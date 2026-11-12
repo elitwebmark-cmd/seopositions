@@ -59,7 +59,6 @@ CREATE TABLE IF NOT EXISTS rankings(
 );
 CREATE INDEX IF NOT EXISTS idx_rank_snap ON rankings(snapshot_id);
 CREATE INDEX IF NOT EXISTS idx_rank_kw ON rankings(keyword_id);
-CREATE INDEX IF NOT EXISTS idx_rank_tgt ON rankings(target_id);
 CREATE INDEX IF NOT EXISTS idx_snap_proj ON snapshots(project_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_targets_proj ON targets(project_id);
 """
@@ -128,6 +127,8 @@ def init_db():
         cols = [r[1] for r in c.execute("PRAGMA table_info(rankings)").fetchall()]
         if "target_id" not in cols:
             c.execute("ALTER TABLE rankings ADD COLUMN target_id INTEGER REFERENCES targets(id)")
+        # Create target_id index now that column definitely exists
+        c.execute("CREATE INDEX IF NOT EXISTS idx_rank_tgt ON rankings(target_id)")
         # Auto-create a default target per project (from project's location/hl) if none
         for p in c.execute("SELECT id, location, hl FROM projects").fetchall():
             existing = c.execute("SELECT id FROM targets WHERE project_id=?", (p[0],)).fetchone()
