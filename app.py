@@ -10,7 +10,8 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-import db, runner
+import asyncio as _asyncio
+import db, runner, tgbot
 
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "change-me")
 SECRET_KEY = os.environ.get("SECRET_KEY", secrets.token_hex(32))
@@ -43,6 +44,7 @@ async def startup():
     db.init_db()
     load_schedules()
     scheduler.start()
+    _asyncio.create_task(tgbot.poll_loop())
 
 def load_schedules():
     for p in db.query("SELECT id, schedule_cron FROM projects WHERE active=1 AND schedule_cron!=''"):
@@ -172,10 +174,38 @@ async def target_del(tid: int, request: Request):
 async def admin_view(request: Request):
     require_auth(request)
     projects = db.query("SELECT * FROM projects ORDER BY created_at DESC")
+    whitelist = db.query("SELECT * FROM tg_whitelist ORDER BY created_at DESC")
+    subs = db.query("""SELECT s.*, p.name project_name FROM tg_subscribers s
+                       JOIN projects p ON p.id=s.project_id ORDER BY s.created_at DESC""")
     return templates.TemplateResponse("admin.html", {
         "request": request, "projects": projects,
         "UA_LOCATIONS": db.UA_LOCATIONS, "LANGUAGES": db.LANGUAGES,
+        "whitelist": whitelist, "subs": subs,
     })
+
+@app.post("/admin/tg/whitelist/add")
+async def tg_wl_add(request: Request, username: str = Form(""), chat_id: str = Form(""), display_name: str = Form("")):
+    require_auth(request)
+    username = username.strip().lstrip("@")
+    try: cid = int(chat_id) if chat_id.strip() else None
+    except: cid = None
+    if not username and not cid:
+        return RedirectResponse("/admin", 303)
+    db.execute("INSERT INTO tg_whitelist(username, chat_id, display_name) VALUES (?,?,?)",
+               (username, cid, display_name.strip()))
+    return RedirectResponse("/admin", 303)
+
+@app.post("/admin/tg/whitelist/{wid}/delete")
+async def tg_wl_del(wid: int, request: Request):
+    require_auth(request)
+    db.execute("DELETE FROM tg_whitelist WHERE id=?", (wid,))
+    return RedirectResponse("/admin", 303)
+
+@app.post("/admin/tg/sub/{sid}/delete")
+async def tg_sub_del(sid: int, request: Request):
+    require_auth(request)
+    db.execute("DELETE FROM tg_subscribers WHERE id=?", (sid,))
+    return RedirectResponse("/admin", 303)
 
 @app.get("/admin/project/{pid}", response_class=HTMLResponse)
 async def admin_project(pid: int, request: Request):

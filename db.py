@@ -61,6 +61,25 @@ CREATE INDEX IF NOT EXISTS idx_rank_snap ON rankings(snapshot_id);
 CREATE INDEX IF NOT EXISTS idx_rank_kw ON rankings(keyword_id);
 CREATE INDEX IF NOT EXISTS idx_snap_proj ON snapshots(project_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_targets_proj ON targets(project_id);
+CREATE TABLE IF NOT EXISTS tg_whitelist(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT DEFAULT '',
+  chat_id INTEGER,
+  display_name TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_wl_user ON tg_whitelist(username);
+CREATE INDEX IF NOT EXISTS idx_wl_chat ON tg_whitelist(chat_id);
+CREATE TABLE IF NOT EXISTS tg_subscribers(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  chat_id INTEGER NOT NULL,
+  username TEXT DEFAULT '',
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  target_id INTEGER REFERENCES targets(id) ON DELETE SET NULL,
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(chat_id, project_id)
+);
+CREATE INDEX IF NOT EXISTS idx_tgs_proj ON tg_subscribers(project_id);
 """
 
 # Ukrainian regional capitals — Google Ads Geo Targets canonical format

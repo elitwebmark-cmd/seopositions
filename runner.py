@@ -43,6 +43,12 @@ async def run_snapshot(project_id: int) -> int:
                 "UPDATE snapshots SET finished_at=datetime('now'), status='done', done=? WHERE id=?",
                 (len(all_results), snap_id),
             )
+        # Notify TG subscribers
+        try:
+            import tgbot
+            await tgbot.send_project_report(project_id, snap_id)
+        except Exception as e:
+            print(f"tg notify err: {e}")
         return snap_id
     except Exception as e:
         with tx() as c:

@@ -28,7 +28,40 @@
 </div>
 
 <div class="card">
-<h2>Існуючі</h2>
+<h2>🤖 Telegram Whitelist ({{ whitelist|length }})</h2>
+<p style="font-size:12px;color:#5A5A5A;margin-bottom:10px;">Лише ці користувачі можуть писати боту й підписуватись на звіти. Додавай за @username (найзручніше) або chat_id.</p>
+<form method="post" action="/admin/tg/whitelist/add" class="grid">
+  <label>@username<input name="username" placeholder="serg_wezom (без @)"></label>
+  <label>Chat ID (опц.)<input name="chat_id" placeholder="123456789"></label>
+  <label>Ім'я для нотатки<input name="display_name" placeholder="Сергій"></label>
+  <button type="submit" class="btn primary">+ Додати</button>
+</form>
+<table class="t" style="margin-top:12px;">
+<thead><tr><th>#</th><th>@username</th><th>chat_id</th><th>Ім'я</th><th>Додано</th><th></th></tr></thead>
+<tbody>
+{% for w in whitelist %}
+<tr><td>{{ w.id }}</td><td>{{ '@'+w.username if w.username else '—' }}</td><td>{{ w.chat_id or '—' }}</td>
+<td>{{ w.display_name }}</td><td style="font-size:10px;">{{ w.created_at[:16] }}</td>
+<td><form method="post" action="/admin/tg/whitelist/{{ w.id }}/delete" style="display:inline;"><button class="btn-x">✕</button></form></td></tr>
+{% endfor %}
+</tbody></table>
+</div>
+
+<div class="card">
+<h2>📬 Підписники ({{ subs|length }})</h2>
+<table class="t">
+<thead><tr><th>#</th><th>chat_id</th><th>@user</th><th>Проєкт</th><th>Додано</th><th></th></tr></thead>
+<tbody>
+{% for s in subs %}
+<tr><td>{{ s.id }}</td><td>{{ s.chat_id }}</td><td>{{ '@'+s.username if s.username else '—' }}</td>
+<td>{{ s.project_name }}</td><td style="font-size:10px;">{{ s.created_at[:16] }}</td>
+<td><form method="post" action="/admin/tg/sub/{{ s.id }}/delete" style="display:inline;"><button class="btn-x">✕</button></form></td></tr>
+{% endfor %}
+</tbody></table>
+</div>
+
+<div class="card">
+<h2>Існуючі проєкти</h2>
 <table class="t">
 <thead><tr><th>#</th><th>Назва</th><th>Домен</th><th>gl/hl</th><th>Локація</th><th>Device</th><th>Cron</th><th>Active</th><th></th></tr></thead>
 <tbody>
