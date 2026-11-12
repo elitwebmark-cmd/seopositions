@@ -26,7 +26,7 @@
    | `SERPER_API_KEY` | твій ключ з serper.dev |
    | `ADMIN_PASSWORD` | придумай надійний |
    | `SECRET_KEY` | будь-який довгий рандомний рядок (`openssl rand -hex 32`) |
-   | `TZ` | `Europe/Kiev` |
+   | `TZ` | `Europe/Kyiv` |
 
 5. Railway авторедеплоїть → відкрий публічний URL → `/login` → введи ADMIN_PASSWORD.
 

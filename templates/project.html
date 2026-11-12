@@ -15,8 +15,16 @@
   <label>Назва<input name="name" value="{{ project.name }}" required></label>
   <label>Домен<input name="domain" value="{{ project.domain }}" required></label>
   <label>Країна (gl)<input name="gl" value="{{ project.gl }}" maxlength="2"></label>
-  <label>Мова (hl)<input name="hl" value="{{ project.hl }}" maxlength="2"></label>
-  <label>Локація (google-формат)<input name="location" value="{{ project.location }}"></label>
+  <label>Мова default (hl)
+    <select name="hl">
+      {% for code, title in LANGUAGES %}<option value="{{ code }}" {% if code==project.hl %}selected{% endif %}>{{ title }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Локація default
+    <select name="location">
+      {% for val, title in UA_LOCATIONS %}<option value="{{ val }}" {% if val==project.location %}selected{% endif %}>{{ title }}</option>{% endfor %}
+    </select>
+  </label>
   <label>Пристрій
     <select name="device">
       <option value="desktop" {% if project.device=='desktop' %}selected{% endif %}>desktop</option>
@@ -29,6 +37,33 @@
   </label>
   <button type="submit" class="btn primary">💾 Зберегти</button>
 </form>
+</div>
+
+<div class="card">
+<h2>🎯 Таргети — локації × мови ({{ targets|length }})</h2>
+<p style="font-size:12px;color:#5A5A5A;margin-bottom:10px;">Кожна пара «місто + мова» знімається окремо. При запуску знімаються позиції для всіх запитів × всіх активних таргетів.</p>
+<form method="post" action="/admin/project/{{ project.id }}/target/new" class="grid">
+  <label>Локація
+    <select name="location" required>
+      {% for val, title in UA_LOCATIONS %}<option value="{{ val }}">{{ title }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Мова
+    <select name="hl">
+      {% for code, title in LANGUAGES %}<option value="{{ code }}" {% if code=='uk' %}selected{% endif %}>{{ title }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Ярлик (опц.)<input name="label" placeholder="напр. Київ UK"></label>
+  <button type="submit" class="btn primary">+ Додати таргет</button>
+</form>
+<table class="t" style="margin-top:14px;">
+<thead><tr><th>#</th><th>Ярлик</th><th>Локація</th><th>Мова</th><th>Акт.</th><th></th></tr></thead>
+<tbody>
+{% for t in targets %}
+<tr><td>{{ t.id }}</td><td>{{ t.label }}</td><td>{{ t.location }}</td><td>{{ t.hl }}</td><td>{{ '✓' if t.active else '✗' }}</td>
+<td><form method="post" action="/admin/target/{{ t.id }}/delete" style="display:inline;" onsubmit="return confirm('Видалити таргет і всі його позиції?')"><button class="btn-x">✕</button></form></td></tr>
+{% endfor %}
+</tbody></table>
 </div>
 
 <div class="card">

@@ -9,8 +9,16 @@
   <label>Назва<input name="name" required placeholder="elit-web.ua"></label>
   <label>Домен<input name="domain" required placeholder="elit-web.ua"></label>
   <label>Країна (gl)<input name="gl" value="ua" maxlength="2"></label>
-  <label>Мова (hl)<input name="hl" value="uk" maxlength="2"></label>
-  <label>Локація (google-формат)<input name="location" value="Ukraine" placeholder="Kyiv, Kyiv city, Ukraine"></label>
+  <label>Мова (hl)
+    <select name="hl">
+      {% for code, title in LANGUAGES %}<option value="{{ code }}" {% if code=='uk' %}selected{% endif %}>{{ title }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Локація (стартовий таргет)
+    <select name="location">
+      {% for val, title in UA_LOCATIONS %}<option value="{{ val }}">{{ title }}</option>{% endfor %}
+    </select>
+  </label>
   <label>Пристрій
     <select name="device"><option value="desktop">desktop</option><option value="mobile">mobile</option></select>
   </label>

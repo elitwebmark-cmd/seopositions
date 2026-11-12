@@ -2,11 +2,12 @@
 {% block body %}
 <section class="wrap">
 <header class="page-h">
-  <h1>📊 {{ project.name }} <small>· {{ project.domain }} · {{ project.gl }}/{{ project.hl }} · {{ project.location }} · {{ project.device }}</small></h1>
+  <h1>📊 {{ project.name }} <small>· {{ project.domain }} · gl:{{ project.gl }} · {{ project.device }}</small></h1>
   <div class="actions">
     <select id="projSel" onchange="location.href='/?project_id='+this.value">
       {% for p in projects %}<option value="{{ p.id }}" {% if p.id==project.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
     </select>
+    <select id="tgtSel"></select>
     <a href="/admin/project/{{ project.id }}" class="btn">⚙</a>
   </div>
 </header>
@@ -51,21 +52,36 @@ const DOMAIN = {{ project.domain|tojson }};
 let DATA = null;
 
 async function load(){
+  const target = document.getElementById('tgtSel').value || '';
   const snapA = document.getElementById('snapA').value || '';
   const snapB = document.getElementById('snapB').value || '';
-  const url = `/api/project/${PID}/data?snapshot=${snapA}&compare=${snapB}`;
+  const url = `/api/project/${PID}/data?target=${target}&snapshot=${snapA}&compare=${snapB}`;
   const r = await fetch(url); DATA = await r.json();
+  if(!DATA.targets || DATA.targets.length===0){
+    document.getElementById('kpis').innerHTML = '<div class="card" style="grid-column:1/-1;"><strong>⚠ Жодного таргету.</strong> Додай хоча б один у <a href="/admin/project/'+PID+'" class="link">налаштуваннях проєкту</a>.</div>';
+    return;
+  }
+  fillTargetSel();
   renderKpis(); renderChart(); renderTable(); fillSelects();
+}
+function fillTargetSel(){
+  const t = document.getElementById('tgtSel');
+  if(t.options.length===0 && DATA.targets){
+    DATA.targets.forEach(x=>{
+      t.add(new Option(`${x.label} · ${x.hl}`, x.id));
+    });
+    t.value = DATA.current_target || '';
+  }
 }
 function fillSelects(){
   const a = document.getElementById('snapA'); const b = document.getElementById('snapB');
-  if(a.options.length===0){
-    DATA.snapshots.forEach(s=>{
-      a.add(new Option(s.started_at.slice(0,16), s.id));
-      b.add(new Option(s.started_at.slice(0,16), s.id));
-    });
-    a.value = DATA.current_snap || '';
-  }
+  // Rebuild on target change
+  a.innerHTML=''; b.innerHTML='<option value="">— немає —</option>';
+  (DATA.snapshots||[]).forEach(s=>{
+    a.add(new Option(s.started_at.slice(0,16), s.id));
+    b.add(new Option(s.started_at.slice(0,16), s.id));
+  });
+  if(DATA.current_snap) a.value = DATA.current_snap;
   if(DATA.compare_snap) b.value = DATA.compare_snap;
 }
 
@@ -128,7 +144,8 @@ let kwChart;
 async function showKw(kid, title){
   document.getElementById('kwTitle').textContent = title;
   document.getElementById('kwModal').classList.add('visible');
-  const r = await fetch(`/api/keyword/${kid}/history`); const h = await r.json();
+  const target = document.getElementById('tgtSel').value || '';
+  const r = await fetch(`/api/keyword/${kid}/history?target=${target}`); const h = await r.json();
   if(kwChart) kwChart.destroy();
   kwChart = new Chart(document.getElementById('kwChart'),{type:'line',
     data:{labels:h.map(x=>x.started_at.slice(0,16)),
@@ -149,6 +166,11 @@ function exportCSV(){
 
 document.getElementById('snapA').addEventListener('change',load);
 document.getElementById('snapB').addEventListener('change',load);
+document.getElementById('tgtSel').addEventListener('change',()=>{
+  document.getElementById('snapA').innerHTML='';
+  document.getElementById('snapB').innerHTML='<option value="">— немає —</option>';
+  load();
+});
 document.getElementById('filter').addEventListener('input',renderTable);
 document.getElementById('fPos').addEventListener('change',renderTable);
 load();

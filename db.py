@@ -38,10 +38,20 @@ CREATE TABLE IF NOT EXISTS snapshots(
   done INTEGER DEFAULT 0,
   error TEXT
 );
+CREATE TABLE IF NOT EXISTS targets(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  location TEXT NOT NULL,
+  hl TEXT NOT NULL DEFAULT 'uk',
+  label TEXT DEFAULT '',
+  active INTEGER DEFAULT 1,
+  UNIQUE(project_id, location, hl)
+);
 CREATE TABLE IF NOT EXISTS rankings(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   snapshot_id INTEGER NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
   keyword_id INTEGER NOT NULL REFERENCES keywords(id) ON DELETE CASCADE,
+  target_id INTEGER REFERENCES targets(id) ON DELETE CASCADE,
   position INTEGER,
   url TEXT,
   title TEXT,
@@ -49,8 +59,51 @@ CREATE TABLE IF NOT EXISTS rankings(
 );
 CREATE INDEX IF NOT EXISTS idx_rank_snap ON rankings(snapshot_id);
 CREATE INDEX IF NOT EXISTS idx_rank_kw ON rankings(keyword_id);
+CREATE INDEX IF NOT EXISTS idx_rank_tgt ON rankings(target_id);
 CREATE INDEX IF NOT EXISTS idx_snap_proj ON snapshots(project_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_targets_proj ON targets(project_id);
 """
+
+# Ukrainian regional capitals — Google Ads Geo Targets canonical format
+UA_LOCATIONS = [
+    ("Ukraine", "Україна (загалом)"),
+    ("Kyiv, Kyiv city, Ukraine", "Київ"),
+    ("Kharkiv, Kharkiv Oblast, Ukraine", "Харків"),
+    ("Odesa, Odesa Oblast, Ukraine", "Одеса"),
+    ("Dnipro, Dnipropetrovsk Oblast, Ukraine", "Дніпро"),
+    ("Donetsk, Donetsk Oblast, Ukraine", "Донецьк"),
+    ("Zaporizhzhia, Zaporizhzhia Oblast, Ukraine", "Запоріжжя"),
+    ("Lviv, Lviv Oblast, Ukraine", "Львів"),
+    ("Kryvyi Rih, Dnipropetrovsk Oblast, Ukraine", "Кривий Ріг"),
+    ("Mykolaiv, Mykolaiv Oblast, Ukraine", "Миколаїв"),
+    ("Sevastopol, Sevastopol city, Ukraine", "Севастополь"),
+    ("Mariupol, Donetsk Oblast, Ukraine", "Маріуполь"),
+    ("Luhansk, Luhansk Oblast, Ukraine", "Луганськ"),
+    ("Vinnytsia, Vinnytsia Oblast, Ukraine", "Вінниця"),
+    ("Simferopol, Autonomous Republic of Crimea, Ukraine", "Сімферополь"),
+    ("Kherson, Kherson Oblast, Ukraine", "Херсон"),
+    ("Chernihiv, Chernihiv Oblast, Ukraine", "Чернігів"),
+    ("Poltava, Poltava Oblast, Ukraine", "Полтава"),
+    ("Cherkasy, Cherkasy Oblast, Ukraine", "Черкаси"),
+    ("Khmelnytskyi, Khmelnytskyi Oblast, Ukraine", "Хмельницький"),
+    ("Chernivtsi, Chernivtsi Oblast, Ukraine", "Чернівці"),
+    ("Zhytomyr, Zhytomyr Oblast, Ukraine", "Житомир"),
+    ("Sumy, Sumy Oblast, Ukraine", "Суми"),
+    ("Rivne, Rivne Oblast, Ukraine", "Рівне"),
+    ("Ivano-Frankivsk, Ivano-Frankivsk Oblast, Ukraine", "Івано-Франківськ"),
+    ("Kropyvnytskyi, Kirovohrad Oblast, Ukraine", "Кропивницький"),
+    ("Ternopil, Ternopil Oblast, Ukraine", "Тернопіль"),
+    ("Lutsk, Volyn Oblast, Ukraine", "Луцьк"),
+    ("Uzhhorod, Zakarpattia Oblast, Ukraine", "Ужгород"),
+]
+
+LANGUAGES = [
+    ("uk", "Українська"),
+    ("ru", "Російська"),
+    ("en", "English"),
+    ("pl", "Polska"),
+    ("de", "Deutsch"),
+]
 
 def conn():
     c = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
@@ -71,6 +124,27 @@ def tx():
 def init_db():
     with tx() as c:
         c.executescript(SCHEMA)
+        # Migration: add target_id column if missing (for pre-targets installs)
+        cols = [r[1] for r in c.execute("PRAGMA table_info(rankings)").fetchall()]
+        if "target_id" not in cols:
+            c.execute("ALTER TABLE rankings ADD COLUMN target_id INTEGER REFERENCES targets(id)")
+        # Auto-create a default target per project (from project's location/hl) if none
+        for p in c.execute("SELECT id, location, hl FROM projects").fetchall():
+            existing = c.execute("SELECT id FROM targets WHERE project_id=?", (p[0],)).fetchone()
+            if not existing:
+                label = (p[1] or "Ukraine").split(",")[0]
+                c.execute(
+                    "INSERT INTO targets(project_id, location, hl, label) VALUES (?,?,?,?)",
+                    (p[0], p[1] or "Ukraine", p[2] or "uk", label),
+                )
+                tid = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+                # Back-fill existing rankings for this project's snapshots
+                c.execute("""
+                    UPDATE rankings SET target_id=?
+                    WHERE target_id IS NULL AND snapshot_id IN (
+                        SELECT id FROM snapshots WHERE project_id=?
+                    )
+                """, (tid, p[0]))
 
 def query(sql, params=()):
     c = conn()
