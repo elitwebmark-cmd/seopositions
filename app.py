@@ -258,3 +258,34 @@ async def run_now(pid: int, request: Request, bg: BackgroundTasks):
 @app.get("/healthz")
 async def health():
     return {"ok": True}
+
+@app.get("/admin/debug/ranking/{rid}")
+async def debug_rank(rid: int, request: Request):
+    require_auth(request)
+    r = db.one("""
+        SELECT r.id, r.position, r.url, r.title, r.serp_json,
+               k.keyword, p.domain, t.location, t.hl
+        FROM rankings r
+        JOIN keywords k ON k.id=r.keyword_id
+        JOIN snapshots s ON s.id=r.snapshot_id
+        JOIN projects p ON p.id=s.project_id
+        LEFT JOIN targets t ON t.id=r.target_id
+        WHERE r.id=?
+    """, (rid,))
+    if not r: return {"err":"not found"}
+    try:
+        serp = json.loads(r["serp_json"]) if r["serp_json"] else {}
+    except: serp = {"raw": r["serp_json"]}
+    organic = (serp.get("organic") or [])[:15]
+    return {
+        "keyword": r["keyword"], "domain": r["domain"],
+        "location": r["location"], "hl": r["hl"],
+        "stored_position": r["position"], "stored_url": r["url"], "stored_title": r["title"],
+        "organic_preview": [{"idx": i+1, "link": x.get("link"), "position": x.get("position"), "title": x.get("title")} for i, x in enumerate(organic)]
+    }
+
+@app.get("/admin/debug/snapshot/{sid}")
+async def debug_snap(sid: int, request: Request):
+    require_auth(request)
+    rows = db.query("SELECT r.id, k.keyword, r.position, r.url FROM rankings r JOIN keywords k ON k.id=r.keyword_id WHERE r.snapshot_id=? ORDER BY k.keyword", (sid,))
+    return {"count": len(rows), "rankings": rows}
