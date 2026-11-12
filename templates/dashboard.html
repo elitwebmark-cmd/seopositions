@@ -1,0 +1,156 @@
+{% extends "base.html" %}{% block title %}{{ project.name }} · dashboard{% endblock %}
+{% block body %}
+<section class="wrap">
+<header class="page-h">
+  <h1>📊 {{ project.name }} <small>· {{ project.domain }} · {{ project.gl }}/{{ project.hl }} · {{ project.location }} · {{ project.device }}</small></h1>
+  <div class="actions">
+    <select id="projSel" onchange="location.href='/?project_id='+this.value">
+      {% for p in projects %}<option value="{{ p.id }}" {% if p.id==project.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
+    </select>
+    <a href="/admin/project/{{ project.id }}" class="btn">⚙</a>
+  </div>
+</header>
+
+<div class="kpi-grid" id="kpis"></div>
+
+<div class="card">
+<h2>📈 Рух видимості</h2>
+<div class="chart-box"><canvas id="historyChart"></canvas></div>
+</div>
+
+<div class="card">
+<div class="toolbar">
+  <h2>Матриця позицій</h2>
+  <div class="row">
+    <label>Зріз A: <select id="snapA"></select></label>
+    <label>Зріз B (порівняння): <select id="snapB"><option value="">— немає —</option></select></label>
+    <input id="filter" placeholder="🔍 фільтр по запиту">
+    <select id="fPos"><option value="">Всі позиції</option><option value="top3">ТОП 3</option><option value="top10">ТОП 10</option><option value="top20">ТОП 11-20</option><option value="top50">ТОП 21-50</option><option value="over50">51-100</option><option value="none">Не в ТОП100</option></select>
+    <button class="btn success" onclick="exportCSV()">💾 CSV</button>
+  </div>
+</div>
+<div class="scrollx">
+<table class="t" id="rankT"><thead><tr>
+<th>#</th><th>Запит</th><th>Тег</th><th>Позиція</th><th>Було</th><th>Δ</th><th>URL</th><th>Графік</th>
+</tr></thead><tbody id="rankB"></tbody></table>
+</div>
+</div>
+
+<!-- Keyword history modal -->
+<div id="kwModal" class="modal" onclick="if(event.target===this)closeKw()">
+<div class="modal-card">
+<header><h3 id="kwTitle"></h3><button class="btn-x" onclick="closeKw()">✕</button></header>
+<div class="chart-box"><canvas id="kwChart"></canvas></div>
+</div></div>
+
+</section>
+
+<script>
+const PID = {{ project.id }};
+const DOMAIN = {{ project.domain|tojson }};
+let DATA = null;
+
+async function load(){
+  const snapA = document.getElementById('snapA').value || '';
+  const snapB = document.getElementById('snapB').value || '';
+  const url = `/api/project/${PID}/data?snapshot=${snapA}&compare=${snapB}`;
+  const r = await fetch(url); DATA = await r.json();
+  renderKpis(); renderChart(); renderTable(); fillSelects();
+}
+function fillSelects(){
+  const a = document.getElementById('snapA'); const b = document.getElementById('snapB');
+  if(a.options.length===0){
+    DATA.snapshots.forEach(s=>{
+      a.add(new Option(s.started_at.slice(0,16), s.id));
+      b.add(new Option(s.started_at.slice(0,16), s.id));
+    });
+    a.value = DATA.current_snap || '';
+  }
+  if(DATA.compare_snap) b.value = DATA.compare_snap;
+}
+
+function renderKpis(){
+  const h = DATA.history; const last = h.length?h[h.length-1]:{t3:0,t10:0,t20:0,t50:0,t100:0,avg_pos:null,tracked:0};
+  const prev = h.length>1?h[h.length-2]:null;
+  function card(lbl,val,prevVal,cls){
+    let delta='';
+    if(prevVal!=null && val!=null){const d=val-prevVal; delta = d===0?'':`<span class="d ${d>0?'up':'dn'}">${d>0?'+':''}${d}</span>`}
+    return `<div class="kpi ${cls||''}"><div class="lbl">${lbl}</div><div class="val">${val||0}${delta}</div></div>`;
+  }
+  const avgP = last.avg_pos?last.avg_pos.toFixed(1):'—';
+  const prevAvg = prev && prev.avg_pos ? prev.avg_pos.toFixed(1):null;
+  document.getElementById('kpis').innerHTML =
+    card('Запитів',last.tracked,prev?.tracked,'')+
+    card('ТОП 3',last.t3,prev?.t3,'green')+
+    card('ТОП 10',last.t10,prev?.t10,'green')+
+    card('ТОП 20',last.t20,prev?.t20,'gold')+
+    card('ТОП 50',last.t50,prev?.t50,'')+
+    card('ТОП 100',last.t100,prev?.t100,'')+
+    `<div class="kpi accent"><div class="lbl">Середня позиція</div><div class="val">${avgP}${prevAvg?' <span class="d">(було '+prevAvg+')</span>':''}</div></div>`;
+}
+
+let histChart;
+function renderChart(){
+  const h = DATA.history;
+  const labels = h.map(x=>x.started_at.slice(5,16));
+  const ctx = document.getElementById('historyChart');
+  if(histChart) histChart.destroy();
+  histChart = new Chart(ctx,{type:'line',data:{labels,
+    datasets:[
+      {label:'ТОП 3', data:h.map(x=>x.t3), borderColor:'#FE391F', backgroundColor:'rgba(254,57,31,.1)', tension:.3, fill:true},
+      {label:'ТОП 10', data:h.map(x=>x.t10), borderColor:'#0F6E56', backgroundColor:'rgba(15,110,86,.08)', tension:.3, fill:true},
+      {label:'ТОП 20', data:h.map(x=>x.t20), borderColor:'#856404', tension:.3},
+      {label:'ТОП 50', data:h.map(x=>x.t50), borderColor:'#5A3F8C', tension:.3},
+    ]},options:{responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{position:'bottom'}}, scales:{y:{beginAtZero:true}}}
+  });
+}
+
+function posBucket(p){if(p==null||p>100)return 'none';if(p<=3)return 'top3';if(p<=10)return 'top10';if(p<=20)return 'top20';if(p<=50)return 'top50';return 'over50';}
+function renderTable(){
+  const f = document.getElementById('filter').value.toLowerCase();
+  const fp = document.getElementById('fPos').value;
+  const rows = DATA.keywords.filter(k=>(!f||k.keyword.toLowerCase().includes(f))&&(!fp||posBucket(k.position)===fp));
+  document.getElementById('rankB').innerHTML = rows.map((k,i)=>{
+    const pos = k.position!=null? `<span class="pos-pill ${posBucket(k.position)}">${k.position}</span>` : '<span class="pos-pill none">—</span>';
+    const prev = k.prev_position!=null? k.prev_position : '';
+    let delta = '';
+    if(k.delta!=null){
+      if(k.delta===0) delta = '<span class="d">=</span>';
+      else delta = `<span class="d ${k.delta>0?'up':'dn'}">${k.delta>0?'▲+':'▼'}${k.delta}</span>`;
+    }
+    const url = k.url? `<a href="${k.url}" target="_blank" class="link" title="${k.url}">${new URL(k.url).pathname.slice(0,40)||'/'}</a>`:'';
+    return `<tr><td>${i+1}</td><td>${k.keyword}</td><td>${k.tag||''}</td><td>${pos}</td><td>${prev}</td><td>${delta}</td><td>${url}</td><td><button class="btn-x" onclick="showKw(${k.id},'${k.keyword.replace(/'/g,"\\'")}')">📈</button></td></tr>`;
+  }).join('');
+}
+
+let kwChart;
+async function showKw(kid, title){
+  document.getElementById('kwTitle').textContent = title;
+  document.getElementById('kwModal').classList.add('visible');
+  const r = await fetch(`/api/keyword/${kid}/history`); const h = await r.json();
+  if(kwChart) kwChart.destroy();
+  kwChart = new Chart(document.getElementById('kwChart'),{type:'line',
+    data:{labels:h.map(x=>x.started_at.slice(0,16)),
+      datasets:[{label:'Позиція',data:h.map(x=>x.position),borderColor:'#5A3F8C',backgroundColor:'rgba(90,63,140,.1)',fill:true,tension:.3,spanGaps:true}]},
+    options:{responsive:true, maintainAspectRatio:false, scales:{y:{reverse:true, min:1, suggestedMax:50}}}
+  });
+}
+function closeKw(){document.getElementById('kwModal').classList.remove('visible');}
+
+function exportCSV(){
+  const hdr = ['#','Запит','Тег','Позиція','Було','Delta','URL'];
+  const rows = DATA.keywords.map((k,i)=>[i+1,k.keyword,k.tag||'',k.position??'',k.prev_position??'',k.delta??'',k.url||'']);
+  const csv = '\ufeff'+[hdr,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));
+  a.download = 'rankings_'+new Date().toISOString().slice(0,10)+'.csv'; a.click();
+}
+
+document.getElementById('snapA').addEventListener('change',load);
+document.getElementById('snapB').addEventListener('change',load);
+document.getElementById('filter').addEventListener('input',renderTable);
+document.getElementById('fPos').addEventListener('change',renderTable);
+load();
+</script>
+{% endblock %}

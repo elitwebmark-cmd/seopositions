@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="uk"><head>
+<meta charset="UTF-8"><title>{% block title %}Rank Tracker{% endblock %}</title>
+<link href="https://fonts.googleapis.com/css2?family=Mulish:wght@400;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head><body>
+<nav class="topnav">
+  <div class="brand">⚡ RANK<span>TRACKER</span></div>
+  <div class="links">
+    <a href="/">📊 Dashboard</a>
+    <a href="/admin">⚙ Admin</a>
+    <a href="/logout" class="right">Logout</a>
+  </div>
+</nav>
+<main>{% block body %}{% endblock %}</main>
+</body></html>

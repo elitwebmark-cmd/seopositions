@@ -1,0 +1,43 @@
+{% extends "base.html" %}{% block title %}Admin · Rank Tracker{% endblock %}
+{% block body %}
+<section class="wrap">
+<header class="page-h"><h1>⚙ Проєкти</h1></header>
+
+<div class="card">
+<h2>+ Новий проєкт</h2>
+<form method="post" action="/admin/project/new" class="grid">
+  <label>Назва<input name="name" required placeholder="elit-web.ua"></label>
+  <label>Домен<input name="domain" required placeholder="elit-web.ua"></label>
+  <label>Країна (gl)<input name="gl" value="ua" maxlength="2"></label>
+  <label>Мова (hl)<input name="hl" value="uk" maxlength="2"></label>
+  <label>Локація (google-формат)<input name="location" value="Ukraine" placeholder="Kyiv, Kyiv city, Ukraine"></label>
+  <label>Пристрій
+    <select name="device"><option value="desktop">desktop</option><option value="mobile">mobile</option></select>
+  </label>
+  <label>Розклад (cron)<input name="schedule_cron" value="0 6 * * *" placeholder="щодня о 06:00"></label>
+  <button type="submit" class="btn primary">Створити</button>
+</form>
+</div>
+
+<div class="card">
+<h2>Існуючі</h2>
+<table class="t">
+<thead><tr><th>#</th><th>Назва</th><th>Домен</th><th>gl/hl</th><th>Локація</th><th>Device</th><th>Cron</th><th>Active</th><th></th></tr></thead>
+<tbody>
+{% for p in projects %}
+<tr>
+  <td>{{ p.id }}</td>
+  <td><a href="/admin/project/{{ p.id }}" class="link">{{ p.name }}</a></td>
+  <td>{{ p.domain }}</td>
+  <td>{{ p.gl }}/{{ p.hl }}</td>
+  <td>{{ p.location }}</td>
+  <td>{{ p.device }}</td>
+  <td><code>{{ p.schedule_cron }}</code></td>
+  <td>{{ '✓' if p.active else '✗' }}</td>
+  <td><a href="/?project_id={{ p.id }}" class="link">📊</a></td>
+</tr>
+{% endfor %}
+</tbody></table>
+</div>
+</section>
+{% endblock %}

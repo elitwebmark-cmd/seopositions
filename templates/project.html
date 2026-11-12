@@ -1,0 +1,67 @@
+{% extends "base.html" %}{% block title %}{{ project.name }} · admin{% endblock %}
+{% block body %}
+<section class="wrap">
+<header class="page-h"><h1>⚙ {{ project.name }}</h1>
+  <div class="actions">
+    <form method="post" action="/admin/project/{{ project.id }}/run"><button class="btn success">▶ Зняти позиції зараз</button></form>
+    <a href="/?project_id={{ project.id }}" class="btn primary">📊 Дешборд</a>
+    <form method="post" action="/admin/project/{{ project.id }}/delete" onsubmit="return confirm('Видалити проєкт?')"><button class="btn danger">🗑 Видалити</button></form>
+  </div>
+</header>
+
+<div class="card">
+<h2>Налаштування</h2>
+<form method="post" action="/admin/project/{{ project.id }}/update" class="grid">
+  <label>Назва<input name="name" value="{{ project.name }}" required></label>
+  <label>Домен<input name="domain" value="{{ project.domain }}" required></label>
+  <label>Країна (gl)<input name="gl" value="{{ project.gl }}" maxlength="2"></label>
+  <label>Мова (hl)<input name="hl" value="{{ project.hl }}" maxlength="2"></label>
+  <label>Локація (google-формат)<input name="location" value="{{ project.location }}"></label>
+  <label>Пристрій
+    <select name="device">
+      <option value="desktop" {% if project.device=='desktop' %}selected{% endif %}>desktop</option>
+      <option value="mobile" {% if project.device=='mobile' %}selected{% endif %}>mobile</option>
+    </select>
+  </label>
+  <label>Розклад (cron)<input name="schedule_cron" value="{{ project.schedule_cron }}"></label>
+  <label>Активний
+    <select name="active"><option value="1" {% if project.active %}selected{% endif %}>так</option><option value="0" {% if not project.active %}selected{% endif %}>ні</option></select>
+  </label>
+  <button type="submit" class="btn primary">💾 Зберегти</button>
+</form>
+</div>
+
+<div class="card">
+<h2>+ Додати запити ({{ keywords|length }})</h2>
+<form method="post" action="/admin/project/{{ project.id }}/keywords" class="grid">
+  <label style="grid-column:1/-1;">Запити (по одному на рядок)<textarea name="keywords" rows="8" placeholder="купити шини&#10;шини літні київ&#10;літня резина цін"></textarea></label>
+  <label>Тег (опц.)<input name="tag" placeholder="літня-резина"></label>
+  <button type="submit" class="btn primary">+ Додати</button>
+</form>
+</div>
+
+<div class="card">
+<h2>Запити</h2>
+<table class="t">
+<thead><tr><th>#</th><th>Запит</th><th>Тег</th><th>Актив.</th><th></th></tr></thead>
+<tbody>
+{% for k in keywords %}
+<tr><td>{{ k.id }}</td><td>{{ k.keyword }}</td><td>{{ k.tag }}</td><td>{{ '✓' if k.active else '✗' }}</td>
+<td><form method="post" action="/admin/keyword/{{ k.id }}/delete" style="display:inline;"><button class="btn-x">✕</button></form></td></tr>
+{% endfor %}
+</tbody></table>
+</div>
+
+<div class="card">
+<h2>Історія зйомів</h2>
+<table class="t">
+<thead><tr><th>#</th><th>Старт</th><th>Фініш</th><th>Статус</th><th>Готово/Всього</th><th>Помилка</th></tr></thead>
+<tbody>
+{% for s in snapshots %}
+<tr><td>{{ s.id }}</td><td>{{ s.started_at }}</td><td>{{ s.finished_at or '-' }}</td>
+<td class="s-{{ s.status }}">{{ s.status }}</td><td>{{ s.done }}/{{ s.total }}</td><td>{{ s.error or '' }}</td></tr>
+{% endfor %}
+</tbody></table>
+</div>
+</section>
+{% endblock %}
