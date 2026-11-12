@@ -84,9 +84,14 @@ async def dashboard(request: Request, project_id: Optional[int] = None):
     })
 
 # ------------ API: dashboard data ------------
+def _int_or_none(v):
+    try: return int(v) if v not in (None, "", "None") else None
+    except: return None
+
 @app.get("/api/project/{pid}/data")
-async def api_data(pid: int, request: Request, target: Optional[int] = None, snapshot: Optional[int] = None, compare: Optional[int] = None):
+async def api_data(pid: int, request: Request, target: Optional[str] = None, snapshot: Optional[str] = None, compare: Optional[str] = None):
     require_auth(request)
+    target = _int_or_none(target); snapshot = _int_or_none(snapshot); compare = _int_or_none(compare)
     targets = db.query("SELECT * FROM targets WHERE project_id=? AND active=1 ORDER BY id", (pid,))
     if not targets:
         return {"keywords": [], "snapshots": [], "history": [], "targets": [], "current_target": None, "current_snap": None, "compare_snap": None}
@@ -130,8 +135,9 @@ async def api_data(pid: int, request: Request, target: Optional[int] = None, sna
 
 # ------------ keyword history for chart ------------
 @app.get("/api/keyword/{kid}/history")
-async def kw_history(kid: int, request: Request, target: Optional[int] = None):
+async def kw_history(kid: int, request: Request, target: Optional[str] = None):
     require_auth(request)
+    target = _int_or_none(target)
     if target:
         return db.query("""
             SELECT s.started_at, r.position, r.url
