@@ -34,10 +34,12 @@ async def search_one(client: httpx.AsyncClient, keyword: str, gl: str, hl: str, 
 
 def find_position(serp: dict, target_domain: str):
     organic = serp.get("organic", []) or []
-    for item in organic:
+    for idx, item in enumerate(organic, start=1):
         url = item.get("link", "")
         if matches(url, target_domain):
-            return item.get("position"), url, item.get("title", "")
+            # Prefer serper's position if provided, else fall back to list index
+            pos = item.get("position") or idx
+            return pos, url, item.get("title", "")
     return None, None, None
 
 async def run_batch(keywords, project, concurrency: int = 5):
