@@ -128,7 +128,7 @@ function renderTable(){
   const fp = document.getElementById('fPos').value;
   const rows = DATA.keywords.filter(k=>(!f||k.keyword.toLowerCase().includes(f))&&(!fp||posBucket(k.position)===fp));
   document.getElementById('rankB').innerHTML = rows.map((k,i)=>{
-    const pos = k.position!=null? `<span class="pos-pill ${posBucket(k.position)}">${k.position}</span>` : '<span class="pos-pill none">—</span>';
+    const pos = k.position!=null? `<span class="pos-pill ${posBucket(k.position)}">${k.position}</span>` : '<span class="pos-pill none" title="Не знайдено в ТОП-100">не в ТОП 100</span>';
     const prev = k.prev_position!=null? k.prev_position : '';
     let delta = '';
     if(k.delta!=null){

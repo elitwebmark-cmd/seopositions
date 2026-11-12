@@ -53,7 +53,7 @@ main{padding:20px}
 .pos-pill.top20{background:#856404;color:#fff}
 .pos-pill.top50{background:#5A5A5A;color:#fff}
 .pos-pill.over50{background:#CCC;color:#000}
-.pos-pill.none{background:#EDEDED;color:#5A5A5A}
+.pos-pill.none{background:#9F2D26;color:#fff;min-width:auto;padding:3px 8px;font-size:10px}
 .s-done{color:#0F6E56;font-weight:800}
 .s-running{color:#856404;font-weight:800}
 .s-error{color:#9F2D26;font-weight:800}
