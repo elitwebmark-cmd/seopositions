@@ -191,7 +191,7 @@ def build_changes(project, targets, snap_id, prev_snap_id=None):
         lines.append(f"\n{icon} <b>Зайшли в {label} ({len(lst)}):</b>")
         for kw, tag, reg, p, c in lst[:15]:
             tag_s = f" [{_escape(tag)}]" if tag else ""
-            lines.append(f"• {_escape(kw)}{tag_s} · <i>{_escape(reg)}</i> · {_delta_str(p,c)}")
+            lines.append(f"🟢 <code>{_escape(kw)}</code>{tag_s} · <i>{_escape(reg)}</i> · {_delta_str(p,c)}")
         if len(lst) > 15:
             lines.append(f"  <i>…+{len(lst)-15} ще</i>")
 
@@ -201,7 +201,7 @@ def build_changes(project, targets, snap_id, prev_snap_id=None):
         lines.append(f"\n{icon} <b>Вилетіли з {label} ({len(lst)}):</b>")
         for kw, tag, reg, p, c in lst[:15]:
             tag_s = f" [{_escape(tag)}]" if tag else ""
-            lines.append(f"• {_escape(kw)}{tag_s} · <i>{_escape(reg)}</i> · {_delta_str(p,c)}")
+            lines.append(f"🔴 <code>{_escape(kw)}</code>{tag_s} · <i>{_escape(reg)}</i> · {_delta_str(p,c)}")
         if len(lst) > 15:
             lines.append(f"  <i>…+{len(lst)-15} ще</i>")
 

@@ -30,6 +30,12 @@ main{padding:20px}
 .t th{background:#000;color:#fff;text-align:left;padding:8px;font-size:10px;text-transform:uppercase}
 .t td{padding:7px 8px;border-bottom:1px solid #EDEDED}
 .t tr:hover{background:#FAF8FE}
+.t tr.row-up{background:#E8F5EA}
+.t tr.row-up:hover{background:#D5EDD9}
+.t tr.row-dn{background:#FDEAEA}
+.t tr.row-dn:hover{background:#F9D5D5}
+.t tr.row-eq{background:#FFF8DC}
+.t tr.row-eq:hover{background:#FDF3C5}
 .link{color:#5A3F8C;font-weight:700;text-decoration:none}
 .link:hover{text-decoration:underline}
 .scrollx{overflow-x:auto;max-height:70vh;overflow-y:auto}

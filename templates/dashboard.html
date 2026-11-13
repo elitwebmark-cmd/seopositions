@@ -161,7 +161,13 @@ function renderTable(){
     }
     const url = k.url? `<a href="${k.url}" target="_blank" class="link" title="${k.url}">${new URL(k.url).pathname.slice(0,40)||'/'}</a>`:'';
     const vol = k.volume? `<span style="font-weight:800;">${k.volume.toLocaleString('uk-UA').replace(/,/g,' ')}</span>`:'<span style="color:#CCC;">—</span>';
-    return `<tr><td>${i+1}</td><td>${k.keyword}</td><td>${k.tag||''}</td><td class="num">${vol}</td><td>${pos}</td><td>${prev}</td><td>${delta}</td><td>${url}</td><td><button class="btn-x" onclick="showKw(${k.id},'${k.keyword.replace(/'/g,"\\'")}')">📈</button></td></tr>`;
+    let rowCls = '';
+    if(k.delta != null){
+      if(k.delta > 0) rowCls = 'row-up';
+      else if(k.delta < 0) rowCls = 'row-dn';
+      else rowCls = 'row-eq';
+    }
+    return `<tr class="${rowCls}"><td>${i+1}</td><td>${k.keyword}</td><td>${k.tag||''}</td><td class="num">${vol}</td><td>${pos}</td><td>${prev}</td><td>${delta}</td><td>${url}</td><td><button class="btn-x" onclick="showKw(${k.id},'${k.keyword.replace(/'/g,"\\'")}')">📈</button></td></tr>`;
   }).join('');
 }
 
