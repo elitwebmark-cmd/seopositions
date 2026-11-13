@@ -28,75 +28,208 @@ def _escape(s):
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+THRESHOLDS = [3, 5, 10, 100]  # TOP tiers we report crossings for
+
+def _delta_str(p, c):
+    if p is None and c is None: return ""
+    if p is None: return f"нова → #{c}"
+    if c is None: return f"#{p} → вилетіла"
+    d = p - c
+    return f"#{p} → #{c} ({'+' if d>0 else ''}{d})"
+
+
+def _chunk_msgs(lines, header="", max_len=3800):
+    """Split long content into multiple messages by lines. Header repeated on each."""
+    out = []; cur = header
+    for ln in lines:
+        if len(cur) + len(ln) + 1 > max_len:
+            out.append(cur)
+            cur = header + ln + "\n"
+        else:
+            cur += ln + "\n"
+    if cur.strip() and cur != header:
+        out.append(cur)
+    return out
+
+
 def format_report(project, target, snap_id, prev_snap_id=None):
-    r = one("""
-        SELECT COUNT(DISTINCT k.id) total,
-          SUM(CASE WHEN r.position BETWEEN 1 AND 3 THEN 1 ELSE 0 END) t3,
-          SUM(CASE WHEN r.position BETWEEN 1 AND 10 THEN 1 ELSE 0 END) t10,
-          SUM(CASE WHEN r.position BETWEEN 1 AND 20 THEN 1 ELSE 0 END) t20,
-          SUM(CASE WHEN r.position BETWEEN 1 AND 50 THEN 1 ELSE 0 END) t50,
-          SUM(CASE WHEN r.position BETWEEN 1 AND 100 THEN 1 ELSE 0 END) t100,
-          AVG(CASE WHEN r.position IS NOT NULL THEN r.position END) avg_p
+    """Return a LIST of messages (telegram-safe chunks)."""
+    # Current rankings with keyword + tag
+    rows = query("""
+        SELECT k.id kid, k.keyword, k.tag, k.volume, r.position
         FROM keywords k
         LEFT JOIN rankings r ON r.keyword_id=k.id AND r.snapshot_id=? AND r.target_id=?
         WHERE k.project_id=? AND k.active=1
     """, (snap_id, target['id'], project['id']))
-    # Compare with previous
-    movers = []
+    cur_map = {r['kid']: r['position'] for r in rows}
+    prev_map = {}
     if prev_snap_id:
-        cur = {x['keyword_id']: x['position'] for x in query(
-            "SELECT keyword_id, position FROM rankings WHERE snapshot_id=? AND target_id=?",
-            (snap_id, target['id']))}
-        prv = {x['keyword_id']: x['position'] for x in query(
-            "SELECT keyword_id, position FROM rankings WHERE snapshot_id=? AND target_id=?",
-            (prev_snap_id, target['id']))}
-        for kid, c_pos in cur.items():
-            p_pos = prv.get(kid)
-            if c_pos != p_pos:
-                kw = one("SELECT keyword FROM keywords WHERE id=?", (kid,))
-                if kw:
-                    movers.append((kw['keyword'], p_pos, c_pos))
-    def delta(p, c):
-        if p is None and c is None: return 0
-        if p is None: return -1000  # new tracked
-        if c is None: return 999  # lost from top-100
-        return p - c  # positive = moved up
+        for r in query("SELECT keyword_id, position FROM rankings WHERE snapshot_id=? AND target_id=?",
+                       (prev_snap_id, target['id'])):
+            prev_map[r['keyword_id']] = r['position']
 
-    movers.sort(key=lambda m: -abs(delta(m[1], m[2])))
-    ups = [m for m in movers if m[1] is not None and m[2] is not None and m[2] < m[1]][:5]
-    downs = [m for m in movers if m[1] is not None and m[2] is not None and m[2] > m[1]][:5]
-    new_lost = [m for m in movers if m[2] is None and m[1] is not None][:5]
-    new_found = [m for m in movers if m[1] is None and m[2] is not None][:5]
+    # Aggregate KPIs
+    total = len(rows)
+    def in_top(n, pos_map): return sum(1 for p in pos_map.values() if p is not None and p <= n)
+    cur_kpi = {t: in_top(t, cur_map) for t in [3,5,10,20,50,100]}
+    prev_kpi = {t: in_top(t, prev_map) for t in [3,5,10,20,50,100]}
+    def avg(pos_map):
+        vals = [p for p in pos_map.values() if p is not None]
+        return sum(vals)/len(vals) if vals else None
+    cur_avg = avg(cur_map); prev_avg = avg(prev_map)
 
-    t = f"<b>📊 {_escape(project['name'])}</b> · {_escape(target['label'])} · <code>{target['hl'].upper()}</code>\n"
-    t += f"<i>Зйом #{snap_id}</i>\n\n"
-    t += f"🏆 ТОП 3: <b>{r['t3'] or 0}</b>\n"
-    t += f"🎯 ТОП 10: <b>{r['t10'] or 0}</b>\n"
-    t += f"📈 ТОП 20: <b>{r['t20'] or 0}</b>\n"
-    t += f"👀 ТОП 100: <b>{r['t100'] or 0}</b> / {r['total']}\n"
-    if r['avg_p']:
-        t += f"📊 Середня: <b>{r['avg_p']:.1f}</b>\n"
-
-    if ups:
-        t += "\n🟢 <b>Виросли:</b>\n"
-        for kw, p, c in ups:
-            t += f"• {_escape(kw)}: {p} → {c} (<b>+{p-c}</b>)\n"
-    if downs:
-        t += "\n🔴 <b>Впали:</b>\n"
-        for kw, p, c in downs:
-            t += f"• {_escape(kw)}: {p} → {c} (<b>-{c-p}</b>)\n"
-    if new_found:
-        t += "\n🆕 <b>Зайшли в ТОП 100:</b>\n"
-        for kw, p, c in new_found:
-            t += f"• {_escape(kw)}: #{c}\n"
-    if new_lost:
-        t += "\n⚠️ <b>Випали з ТОП 100:</b>\n"
-        for kw, p, c in new_lost:
-            t += f"• {_escape(kw)} (було {p})\n"
-
+    # ---- Message 1: Header + KPIs ----
+    hdr = f"<b>📊 {_escape(project['name'])}</b> · {_escape(target['label'])} · <code>{target['hl'].upper()}</code>\n<i>Зйом #{snap_id}</i>\n\n"
+    def dlt(c, p):
+        if not p: return ""
+        d = c - p
+        if d == 0: return ""
+        return f" <b>{'+' if d>0 else ''}{d}</b>"
+    m1 = hdr + "🏆 <b>Розподіл по ТОПу:</b>\n"
+    m1 += f"🥇 ТОП 3: <b>{cur_kpi[3]}</b>{dlt(cur_kpi[3], prev_kpi.get(3,0))}\n"
+    m1 += f"🏅 ТОП 5: <b>{cur_kpi[5]}</b>{dlt(cur_kpi[5], prev_kpi.get(5,0))}\n"
+    m1 += f"🎯 ТОП 10: <b>{cur_kpi[10]}</b>{dlt(cur_kpi[10], prev_kpi.get(10,0))}\n"
+    m1 += f"📈 ТОП 20: <b>{cur_kpi[20]}</b>{dlt(cur_kpi[20], prev_kpi.get(20,0))}\n"
+    m1 += f"📉 ТОП 50: <b>{cur_kpi[50]}</b>{dlt(cur_kpi[50], prev_kpi.get(50,0))}\n"
+    m1 += f"👀 ТОП 100: <b>{cur_kpi[100]}</b> / {total}{dlt(cur_kpi[100], prev_kpi.get(100,0))}\n"
+    if cur_avg:
+        avg_d = ""
+        if prev_avg:
+            d = cur_avg - prev_avg
+            if abs(d) > 0.1: avg_d = f" ({'+' if d>0 else ''}{d:.1f})"
+        m1 += f"\n📊 Середня позиція: <b>{cur_avg:.1f}</b>{avg_d}"
     if PUBLIC_URL:
-        t += f'\n<a href="{PUBLIC_URL}/?project_id={project["id"]}">📊 Відкрити дешборд</a>'
-    return t
+        m1 += f'\n\n🔗 <a href="{PUBLIC_URL}/?project_id={project["id"]}">Дешборд</a>'
+    messages = [m1]
+
+    if not prev_snap_id:
+        messages.append("ℹ️ <i>Це перший зйом — порівняння буде доступне після наступного запуску.</i>")
+        return messages
+
+    # ---- Classify crossings ----
+    entered = {t: [] for t in THRESHOLDS}  # entered TOP T (ранкуються краще)
+    left = {t: [] for t in THRESHOLDS}     # left TOP T (ранкуються гірше)
+    # map kid → (keyword, tag)
+    kw_info = {r['kid']: (r['keyword'], r['tag'] or '') for r in rows}
+
+    for kid, c in cur_map.items():
+        p = prev_map.get(kid)
+        if c == p: continue
+        kw, tag = kw_info.get(kid, (f"#{kid}", ''))
+        entry = (kw, tag, p, c)
+        # entered: smallest T that newly contains
+        for t in THRESHOLDS:
+            if c is not None and c <= t and (p is None or p > t):
+                entered[t].append(entry)
+                break
+        # left: largest T that newly doesn't contain
+        for t in reversed(THRESHOLDS):
+            if p is not None and p <= t and (c is None or c > t):
+                left[t].append(entry)
+                break
+
+    # ---- Message 2: Entered TOPs ----
+    entered_total = sum(len(v) for v in entered.values())
+    if entered_total:
+        lines = []
+        for t, label, icon in [(3, "ТОП 3", "🥇"), (5, "ТОП 5", "🏅"), (10, "ТОП 10", "🎯"), (100, "ТОП 100", "🆕")]:
+            lst = entered[t]
+            if not lst: continue
+            lines.append(f"\n<b>{icon} Зайшли в {label} ({len(lst)}):</b>")
+            for kw, tag, p, c in lst[:20]:
+                tag_s = f" <code>[{_escape(tag)}]</code>" if tag else ""
+                lines.append(f"• {_escape(kw)}{tag_s} — {_delta_str(p, c)}")
+            if len(lst) > 20:
+                lines.append(f"<i>…+{len(lst)-20} запитів</i>")
+        head = hdr + f"🟢 <b>РОСТ ({entered_total} запитів)</b>\n"
+        messages.extend(_chunk_msgs(lines, head))
+
+    # ---- Message 3: Left TOPs ----
+    left_total = sum(len(v) for v in left.values())
+    if left_total:
+        lines = []
+        for t, label, icon in [(3, "ТОП 3", "🥇"), (5, "ТОП 5", "🏅"), (10, "ТОП 10", "🎯"), (100, "ТОП 100", "💥")]:
+            lst = left[t]
+            if not lst: continue
+            lines.append(f"\n<b>{icon} Вилетіли з {label} ({len(lst)}):</b>")
+            for kw, tag, p, c in lst[:20]:
+                tag_s = f" <code>[{_escape(tag)}]</code>" if tag else ""
+                lines.append(f"• {_escape(kw)}{tag_s} — {_delta_str(p, c)}")
+            if len(lst) > 20:
+                lines.append(f"<i>…+{len(lst)-20} запитів</i>")
+        head = hdr + f"🔴 <b>ПАДІННЯ ({left_total} запитів)</b>\n"
+        messages.extend(_chunk_msgs(lines, head))
+
+    # ---- Message 4: By tag ----
+    tag_stats = {}
+    for r in rows:
+        tag = r['tag'] or 'без тегу'
+        st = tag_stats.setdefault(tag, {'count':0, 't3':0, 't10':0, 't100':0, 'pos':[]})
+        st['count'] += 1
+        p = r['position']
+        if p:
+            if p <= 3: st['t3'] += 1
+            if p <= 10: st['t10'] += 1
+            if p <= 100: st['t100'] += 1
+            st['pos'].append(p)
+    if len(tag_stats) > 1:
+        lines = []
+        for tag in sorted(tag_stats.keys(), key=lambda x: -tag_stats[x]['t10']):
+            s = tag_stats[tag]
+            avg_p = sum(s['pos'])/len(s['pos']) if s['pos'] else None
+            avg_s = f", сер. <b>{avg_p:.1f}</b>" if avg_p else ""
+            lines.append(f"\n<b>[{_escape(tag)}]</b> ({s['count']} зап.)")
+            lines.append(f"ТОП 3: <b>{s['t3']}</b> · ТОП 10: <b>{s['t10']}</b> · ТОП 100: <b>{s['t100']}</b>/{s['count']}{avg_s}")
+        head = hdr + f"🏷 <b>ПО ТЕГАМ</b>\n"
+        messages.extend(_chunk_msgs(lines, head))
+
+    return messages
+
+
+def format_cross_region(project, targets, snap_id, prev_snap_id=None):
+    """Compare metrics across all targets for one snapshot."""
+    if len(targets) < 2:
+        return None
+    lines = []
+    lines.append(f"<b>🌍 Порівняння регіонів</b>\n")
+    lines.append(f"<i>Зйом #{snap_id}</i>\n")
+    # Compute stats per target
+    stats = []
+    for t in targets:
+        pos_rows = query("""SELECT position FROM rankings
+                            WHERE snapshot_id=? AND target_id=?""", (snap_id, t['id']))
+        vals = [r['position'] for r in pos_rows if r['position'] is not None]
+        kpis = {
+            't3': sum(1 for v in vals if v <= 3),
+            't5': sum(1 for v in vals if v <= 5),
+            't10': sum(1 for v in vals if v <= 10),
+            't100': len(vals),
+            'avg': sum(vals)/len(vals) if vals else None,
+            'label': t['label'], 'hl': t['hl'], 'tid': t['id']
+        }
+        # previous avg for delta
+        if prev_snap_id:
+            p_rows = query("""SELECT position FROM rankings WHERE snapshot_id=? AND target_id=?""",
+                           (prev_snap_id, t['id']))
+            p_vals = [r['position'] for r in p_rows if r['position'] is not None]
+            kpis['prev_avg'] = sum(p_vals)/len(p_vals) if p_vals else None
+            kpis['prev_t10'] = sum(1 for v in p_vals if v <= 10)
+        stats.append(kpis)
+    stats.sort(key=lambda s: (-(s['t10']), s['avg'] or 999))
+    for s in stats:
+        avg_s = f"<b>{s['avg']:.1f}</b>" if s['avg'] else "—"
+        if s.get('prev_avg') and s['avg']:
+            d = s['avg'] - s['prev_avg']
+            if abs(d) > 0.1:
+                avg_s += f" ({'+' if d>0 else ''}{d:.1f})"
+        t10_d = ""
+        if s.get('prev_t10') is not None:
+            d = s['t10'] - s['prev_t10']
+            if d: t10_d = f" ({'+' if d>0 else ''}{d})"
+        lines.append(f"\n📍 <b>{_escape(s['label'])}</b> · <code>{s['hl'].upper()}</code>")
+        lines.append(f"ТОП 3: <b>{s['t3']}</b> · ТОП 5: <b>{s['t5']}</b> · ТОП 10: <b>{s['t10']}</b>{t10_d}")
+        lines.append(f"В індексі: <b>{s['t100']}</b> · Середня: {avg_s}")
+    return "\n".join(lines)
 
 
 async def send_project_report(project_id, snap_id):
@@ -110,12 +243,20 @@ async def send_project_report(project_id, snap_id):
                   ORDER BY id DESC LIMIT 1""", (project_id, snap_id))
     prev_id = prev['id'] if prev else None
     subs = query("SELECT * FROM tg_subscribers WHERE project_id=?", (project_id,))
+    cross = format_cross_region(proj, targets, snap_id, prev_id)
     for sub in subs:
+        # Cross-region first (overview across all targets)
+        if cross and not sub.get('target_id'):
+            try: await send(sub['chat_id'], cross)
+            except Exception as e: print(f"cross err: {e}")
         for tgt in targets:
             if sub.get('target_id') and sub['target_id'] != tgt['id']:
                 continue
             try:
-                await send(sub['chat_id'], format_report(proj, tgt, snap_id, prev_id))
+                msgs = format_report(proj, tgt, snap_id, prev_id)
+                for m in msgs:
+                    await send(sub['chat_id'], m)
+                    await asyncio.sleep(0.3)  # don't hit tg rate limit
             except Exception as e:
                 print(f"tg send err chat={sub['chat_id']}: {e}")
 
@@ -213,9 +354,16 @@ async def handle_update(update):
                    (pid, snap['id']))
         proj = one("SELECT * FROM projects WHERE id=?", (pid,))
         targets = query("SELECT * FROM targets WHERE project_id=? AND active=1", (pid,))
+        prev_id = prev['id'] if prev else None
+        cross = format_cross_region(proj, targets, snap['id'], prev_id)
+        if cross:
+            try: await send(chat_id, cross)
+            except: pass
         for tgt in targets:
             try:
-                await send(chat_id, format_report(proj, tgt, snap['id'], prev['id'] if prev else None))
+                for m in format_report(proj, tgt, snap['id'], prev_id):
+                    await send(chat_id, m)
+                    await asyncio.sleep(0.3)
             except Exception as e:
                 print(f"report err: {e}")
 
