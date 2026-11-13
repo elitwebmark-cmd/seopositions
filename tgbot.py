@@ -119,7 +119,14 @@ def _colored_delta(d, reverse=False):
 
 def build_overview(project, targets, snap_id, prev_snap_id=None):
     """Message 1 — header + regions table."""
-    lines = [f"<b>📊 {_escape(project['name'])}</b> · <i>Зйом #{snap_id}</i>\n"]
+    snap = one("SELECT started_at, finished_at FROM snapshots WHERE id=?", (snap_id,))
+    when = (snap['finished_at'] or snap['started_at']) if snap else ''
+    # format: 2026-11-13 06:15 (strip seconds, keep as is)
+    when_str = when[:16] if when else ''
+    lines = [f"<b>📊 {_escape(project['name'])}</b> · <i>Зйом #{snap_id}</i>"]
+    if when_str:
+        lines.append(f"🕒 <i>{when_str}</i>")
+    lines.append("")
     lines.append("<pre>")
     lines.append(f"{_pad('Регіон',14)} {_pad('Lng',4)} {_pad('Т3',6)} {_pad('Т5',6)} {_pad('Т10',6)} {_pad('Т100',8)} {_pad('Сер',10)}")
     all_cur_pos = []; all_prev_pos = []
