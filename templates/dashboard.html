@@ -27,6 +27,16 @@
     <label>Зріз B (порівняння): <select id="snapB"><option value="">— немає —</option></select></label>
     <input id="filter" placeholder="🔍 фільтр по запиту">
     <select id="fPos"><option value="">Всі позиції</option><option value="top3">ТОП 3</option><option value="top10">ТОП 10</option><option value="top20">ТОП 11-20</option><option value="top50">ТОП 21-50</option><option value="over50">51-100</option><option value="none">Не в ТОП100</option></select>
+    <select id="sortBy">
+      <option value="pos_asc" selected>Позиція ↑</option>
+      <option value="pos_desc">Позиція ↓</option>
+      <option value="tag">Тег А→Я</option>
+      <option value="page">Сторінка (URL)</option>
+      <option value="kw">Запит А→Я</option>
+      <option value="vol_desc">Частотність ↓</option>
+      <option value="delta_desc">Δ виросли ↓</option>
+      <option value="delta_asc">Δ впали ↑</option>
+    </select>
     <button class="btn success" onclick="exportCSV()">💾 CSV</button>
   </div>
 </div>
@@ -123,10 +133,24 @@ function renderChart(){
 }
 
 function posBucket(p){if(p==null||p>100)return 'none';if(p<=3)return 'top3';if(p<=10)return 'top10';if(p<=20)return 'top20';if(p<=50)return 'top50';return 'over50';}
+function pathOf(u){try{return new URL(u).pathname||'/';}catch(e){return '';}}
 function renderTable(){
   const f = document.getElementById('filter').value.toLowerCase();
   const fp = document.getElementById('fPos').value;
-  const rows = DATA.keywords.filter(k=>(!f||k.keyword.toLowerCase().includes(f))&&(!fp||posBucket(k.position)===fp));
+  const sb = document.getElementById('sortBy').value;
+  let rows = DATA.keywords.filter(k=>(!f||k.keyword.toLowerCase().includes(f))&&(!fp||posBucket(k.position)===fp));
+  const POS_MAX = 999999;
+  const sorters = {
+    pos_asc: (a,b)=>(a.position??POS_MAX)-(b.position??POS_MAX),
+    pos_desc:(a,b)=>(b.position??-1)-(a.position??-1),
+    tag:     (a,b)=>(a.tag||'zz').localeCompare(b.tag||'zz') || (a.position??POS_MAX)-(b.position??POS_MAX),
+    page:    (a,b)=>pathOf(a.url).localeCompare(pathOf(b.url)) || (a.position??POS_MAX)-(b.position??POS_MAX),
+    kw:      (a,b)=>a.keyword.localeCompare(b.keyword),
+    vol_desc:(a,b)=>(b.volume||0)-(a.volume||0),
+    delta_desc:(a,b)=>(b.delta??-POS_MAX)-(a.delta??-POS_MAX),
+    delta_asc: (a,b)=>(a.delta??POS_MAX)-(b.delta??POS_MAX),
+  };
+  rows.sort(sorters[sb] || sorters.pos_asc);
   document.getElementById('rankB').innerHTML = rows.map((k,i)=>{
     const pos = k.position!=null? `<span class="pos-pill ${posBucket(k.position)}">${k.position}</span>` : '<span class="pos-pill none" title="Не знайдено в ТОП-100">не в ТОП 100</span>';
     const prev = k.prev_position!=null? k.prev_position : '';
@@ -174,6 +198,7 @@ document.getElementById('tgtSel').addEventListener('change',()=>{
 });
 document.getElementById('filter').addEventListener('input',renderTable);
 document.getElementById('fPos').addEventListener('change',renderTable);
+document.getElementById('sortBy').addEventListener('change',renderTable);
 load();
 </script>
 {% endblock %}
