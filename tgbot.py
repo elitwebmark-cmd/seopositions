@@ -103,14 +103,27 @@ def _pad(s, w):
     return s + " " * max(0, w - len(s))
 
 
+def _colored_delta(d, reverse=False):
+    """d > 0 means increase. reverse=True for metrics where lower is better (avg position).
+    Returns html snippet with 🟢/🔴/⚪ indicator."""
+    if d is None or d == 0:
+        return ""
+    good = (d < 0) if reverse else (d > 0)
+    icon = "🟢" if good else "🔴"
+    sign = "+" if d > 0 else ""
+    # format integers without decimals
+    if isinstance(d, int):
+        return f" {icon}{sign}{d}"
+    return f" {icon}{sign}{d:.1f}"
+
+
 def build_overview(project, targets, snap_id, prev_snap_id=None):
     """Message 1 — header + regions table."""
     lines = [f"<b>📊 {_escape(project['name'])}</b> · <i>Зйом #{snap_id}</i>\n"]
-    # Table rows
     lines.append("<pre>")
-    lines.append(f"{_pad('Регіон',14)} {_pad('Lng',4)} {_pad('Т3',5)} {_pad('Т5',5)} {_pad('Т10',5)} {_pad('Т100',8)} {_pad('Сер',6)}")
-    all_cur_pos = []
-    all_prev_pos = []
+    lines.append(f"{_pad('Регіон',14)} {_pad('Lng',4)} {_pad('Т3',6)} {_pad('Т5',6)} {_pad('Т10',6)} {_pad('Т100',8)} {_pad('Сер',10)}")
+    all_cur_pos = []; all_prev_pos = []
+    t_total = one("SELECT COUNT(*) c FROM keywords WHERE project_id=? AND active=1", (project['id'],))['c']
     for t in targets:
         cur = [r['position'] for r in query("SELECT position FROM rankings WHERE snapshot_id=? AND target_id=?",
                                             (snap_id, t['id'])) if r['position'] is not None]
@@ -119,29 +132,35 @@ def build_overview(project, targets, snap_id, prev_snap_id=None):
             prv = [r['position'] for r in query("SELECT position FROM rankings WHERE snapshot_id=? AND target_id=?",
                                                 (prev_snap_id, t['id'])) if r['position'] is not None]
         all_cur_pos.extend(cur); all_prev_pos.extend(prv)
-        t_total = one("""SELECT COUNT(*) c FROM keywords WHERE project_id=? AND active=1""", (project['id'],))['c']
         def cnt(v, n): return sum(1 for x in v if x <= n)
-        def fmt_delta(cur_val, prev_v, n):
-            if not prev_v: return f"{cnt(cur_val, n)}"
-            d = cnt(cur_val, n) - cnt(prev_v, n)
-            if d == 0: return f"{cnt(cur_val, n)}"
-            return f"{cnt(cur_val, n)}{'↑' if d>0 else '↓'}{abs(d)}"
+        def fmt_cnt(cur_v, prev_v, n):
+            if not prev_v: return f"{cnt(cur_v, n)}"
+            d = cnt(cur_v, n) - cnt(prev_v, n)
+            if d == 0: return f"{cnt(cur_v, n)}"
+            return f"{cnt(cur_v, n)}{'↑' if d>0 else '↓'}{abs(d)}"
         avg = sum(cur)/len(cur) if cur else None
-        avg_s = f"{avg:.1f}" if avg else "—"
+        pavg = sum(prv)/len(prv) if prv else None
+        avg_s = "—"
+        if avg is not None:
+            avg_s = f"{avg:.1f}"
+            if pavg is not None:
+                dd = avg - pavg
+                if abs(dd) >= 0.05:
+                    avg_s += f" {'↑' if dd<0 else '↓'}{abs(dd):.1f}"  # lower = better (↑)
         lbl = (t['label'] or '—')[:14]
         lines.append(f"{_pad(lbl,14)} {_pad(t['hl'].upper(),4)} "
-                     f"{_pad(fmt_delta(cur, prv, 3),5)} {_pad(fmt_delta(cur, prv, 5),5)} "
-                     f"{_pad(fmt_delta(cur, prv, 10),5)} {_pad(f'{len(cur)}/{t_total}',8)} "
-                     f"{_pad(avg_s,6)}")
+                     f"{_pad(fmt_cnt(cur, prv, 3),6)} {_pad(fmt_cnt(cur, prv, 5),6)} "
+                     f"{_pad(fmt_cnt(cur, prv, 10),6)} {_pad(f'{len(cur)}/{t_total}',8)} "
+                     f"{_pad(avg_s,10)}")
     lines.append("</pre>")
-    # Global
     if all_cur_pos:
         gavg = sum(all_cur_pos)/len(all_cur_pos)
         d_s = ""
         if all_prev_pos:
             pavg = sum(all_prev_pos)/len(all_prev_pos)
             dd = gavg - pavg
-            if abs(dd) > 0.05: d_s = f" ({'+' if dd>0 else ''}{dd:.1f})"
+            if abs(dd) > 0.05:
+                d_s = f" ({'↑' if dd<0 else '↓'}{abs(dd):.1f})"
         lines.append(f"\n📊 <b>Сер. по проєкту:</b> {gavg:.1f}{d_s}")
     if PUBLIC_URL:
         lines.append(f'\n🔗 <a href="{PUBLIC_URL}/?project_id={project["id"]}">Відкрити дешборд</a>')
