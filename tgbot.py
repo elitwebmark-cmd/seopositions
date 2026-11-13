@@ -235,31 +235,59 @@ def build_changes(project, targets, snap_id, prev_snap_id=None):
                     [(3,"ТОП 3","🥇"),(5,"ТОП 5","🏅"),(10,"ТОП 10","🎯"),(100,"ТОП 100","💥")])
 
     # ---- Tag summary as its OWN message, atomic (pre block intact) ----
-    tag_stats = {}
+    def collect_tag_stats(sid):
+        stats = {}
+        for tgt in targets:
+            for r in query("""
+                SELECT k.tag, r.position FROM keywords k
+                LEFT JOIN rankings r ON r.keyword_id=k.id AND r.snapshot_id=? AND r.target_id=?
+                WHERE k.project_id=? AND k.active=1
+            """, (sid, tgt['id'], project['id'])):
+                tag = r['tag'] or 'без тегу'
+                st = stats.setdefault(tag, {'t3':0, 't10':0, 'pos':[]})
+                p = r['position']
+                if p:
+                    if p <= 3: st['t3'] += 1
+                    if p <= 10: st['t10'] += 1
+                    st['pos'].append(p)
+        for tag in stats:
+            stats[tag]['avg'] = sum(stats[tag]['pos'])/len(stats[tag]['pos']) if stats[tag]['pos'] else None
+        return stats
+
+    tag_stats = collect_tag_stats(snap_id)
+    tag_prev = collect_tag_stats(prev_snap_id) if prev_snap_id else {}
+    # also compute total count per tag (based on keywords × targets)
+    tag_count = {}
     for tgt in targets:
-        for r in query("""
-            SELECT k.tag, r.position FROM keywords k
-            LEFT JOIN rankings r ON r.keyword_id=k.id AND r.snapshot_id=? AND r.target_id=?
-            WHERE k.project_id=? AND k.active=1
-        """, (snap_id, tgt['id'], project['id'])):
+        for r in query("SELECT tag FROM keywords WHERE project_id=? AND active=1", (project['id'],)):
             tag = r['tag'] or 'без тегу'
-            st = tag_stats.setdefault(tag, {'count':0, 't3':0, 't10':0, 't100':0, 'pos':[]})
-            st['count'] += 1
-            p = r['position']
-            if p:
-                if p <= 3: st['t3'] += 1
-                if p <= 10: st['t10'] += 1
-                if p <= 100: st['t100'] += 1
-                st['pos'].append(p)
+            tag_count[tag] = tag_count.get(tag, 0) + 1
+
+    def fmt_cnt_d(cur_v, prev_v):
+        if prev_v is None: return f"{cur_v}"
+        d = cur_v - prev_v
+        if d == 0: return f"{cur_v}"
+        return f"{cur_v}{'↑' if d>0 else '↓'}{abs(d)}"
+    def fmt_avg_d(cur_v, prev_v):
+        if cur_v is None: return "—"
+        s = f"{cur_v:.1f}"
+        if prev_v is not None:
+            d = cur_v - prev_v
+            if abs(d) >= 0.05:
+                s += f" {'↑' if d<0 else '↓'}{abs(d):.1f}"
+        return s
+
     if tag_stats:
         parts = ["🏷 <b>По тегам (всі регіони)</b>\n", "<pre>"]
-        parts.append(f"{_pad('Тег',22)} {_pad('Усього',7)} {_pad('Т3',5)} {_pad('Т10',5)} {_pad('Сер',6)}")
+        parts.append(f"{_pad('Тег',22)} {_pad('Усього',7)} {_pad('Т3',7)} {_pad('Т10',7)} {_pad('Сер',10)}")
         for tag in sorted(tag_stats.keys(), key=lambda x: -tag_stats[x]['t10']):
             s = tag_stats[tag]
-            avg = sum(s['pos'])/len(s['pos']) if s['pos'] else None
-            avg_s = f"{avg:.1f}" if avg else "—"
+            p = tag_prev.get(tag)
+            avg_s = fmt_avg_d(s['avg'], p['avg'] if p else None)
+            t3_s = fmt_cnt_d(s['t3'], p['t3'] if p else None)
+            t10_s = fmt_cnt_d(s['t10'], p['t10'] if p else None)
             tg = _escape(tag)[:22]
-            parts.append(f"{_pad(tg,22)} {_pad(s['count'],7)} {_pad(s['t3'],5)} {_pad(s['t10'],5)} {_pad(avg_s,6)}")
+            parts.append(f"{_pad(tg,22)} {_pad(tag_count.get(tag,0),7)} {_pad(t3_s,7)} {_pad(t10_s,7)} {_pad(avg_s,10)}")
         parts.append("</pre>")
         messages.append("\n".join(parts))
 
