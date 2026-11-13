@@ -32,7 +32,7 @@
 </div>
 <div class="scrollx">
 <table class="t" id="rankT"><thead><tr>
-<th>#</th><th>Запит</th><th>Тег</th><th>Позиція</th><th>Було</th><th>Δ</th><th>URL</th><th>Графік</th>
+<th>#</th><th>Запит</th><th>Тег</th><th class="num">Freq</th><th>Позиція</th><th>Було</th><th>Δ</th><th>URL</th><th>Графік</th>
 </tr></thead><tbody id="rankB"></tbody></table>
 </div>
 </div>
@@ -136,7 +136,8 @@ function renderTable(){
       else delta = `<span class="d ${k.delta>0?'up':'dn'}">${k.delta>0?'▲+':'▼'}${k.delta}</span>`;
     }
     const url = k.url? `<a href="${k.url}" target="_blank" class="link" title="${k.url}">${new URL(k.url).pathname.slice(0,40)||'/'}</a>`:'';
-    return `<tr><td>${i+1}</td><td>${k.keyword}</td><td>${k.tag||''}</td><td>${pos}</td><td>${prev}</td><td>${delta}</td><td>${url}</td><td><button class="btn-x" onclick="showKw(${k.id},'${k.keyword.replace(/'/g,"\\'")}')">📈</button></td></tr>`;
+    const vol = k.volume? `<span style="font-weight:800;">${k.volume.toLocaleString('uk-UA').replace(/,/g,' ')}</span>`:'<span style="color:#CCC;">—</span>';
+    return `<tr><td>${i+1}</td><td>${k.keyword}</td><td>${k.tag||''}</td><td class="num">${vol}</td><td>${pos}</td><td>${prev}</td><td>${delta}</td><td>${url}</td><td><button class="btn-x" onclick="showKw(${k.id},'${k.keyword.replace(/'/g,"\\'")}')">📈</button></td></tr>`;
   }).join('');
 }
 

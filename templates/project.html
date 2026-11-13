@@ -76,12 +76,19 @@
 </div>
 
 <div class="card">
-<h2>Запити</h2>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+<h2 style="margin:0;">Запити ({{ keywords|length }})</h2>
+<form method="post" action="/admin/project/{{ project.id }}/refresh-volumes">
+<button class="btn primary">🔄 Оновити частотність (DataForSEO)</button>
+</form>
+</div>
 <table class="t">
-<thead><tr><th>#</th><th>Запит</th><th>Тег</th><th>Актив.</th><th></th></tr></thead>
+<thead><tr><th>#</th><th>Запит</th><th>Тег</th><th>Частотність</th><th>Актив.</th><th></th></tr></thead>
 <tbody>
 {% for k in keywords %}
-<tr><td>{{ k.id }}</td><td>{{ k.keyword }}</td><td>{{ k.tag }}</td><td>{{ '✓' if k.active else '✗' }}</td>
+<tr><td>{{ k.id }}</td><td>{{ k.keyword }}</td><td>{{ k.tag }}</td>
+<td style="text-align:right;font-weight:800;">{{ '{:,}'.format(k.volume).replace(',',' ') if k.volume else '—' }}</td>
+<td>{{ '✓' if k.active else '✗' }}</td>
 <td><form method="post" action="/admin/keyword/{{ k.id }}/delete" style="display:inline;"><button class="btn-x">✕</button></form></td></tr>
 {% endfor %}
 </tbody></table>

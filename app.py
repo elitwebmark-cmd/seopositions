@@ -11,7 +11,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import asyncio as _asyncio
-import db, runner, tgbot
+import db, runner, tgbot, dataforseo
 
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "change-me")
 SECRET_KEY = os.environ.get("SECRET_KEY", secrets.token_hex(32))
@@ -257,16 +257,34 @@ async def project_delete(pid: int, request: Request):
     return RedirectResponse("/admin", 303)
 
 @app.post("/admin/project/{pid}/keywords")
-async def kw_bulk(pid: int, request: Request, keywords: str = Form(...), tag: str = Form("")):
+async def kw_bulk(pid: int, request: Request, bg: BackgroundTasks, keywords: str = Form(...), tag: str = Form("")):
     require_auth(request)
     seen = set()
+    added_ids = []
     for line in keywords.splitlines():
         kw = line.strip()
         if not kw or kw in seen: continue
         seen.add(kw)
         try:
-            db.execute("INSERT INTO keywords(project_id, keyword, tag) VALUES (?,?,?)", (pid, kw, tag))
+            new_id = db.execute("INSERT INTO keywords(project_id, keyword, tag) VALUES (?,?,?)", (pid, kw, tag))
+            added_ids.append(new_id)
         except Exception: pass
+    # Fire-and-forget volume fetch for the project (updates all 0-volume ones)
+    async def _refresh():
+        try:
+            await dataforseo.refresh_project_volumes(pid)
+        except Exception as e:
+            print(f"vol fetch err: {e}")
+    bg.add_task(_refresh)
+    return RedirectResponse(f"/admin/project/{pid}", 303)
+
+@app.post("/admin/project/{pid}/refresh-volumes")
+async def refresh_vols(pid: int, request: Request, bg: BackgroundTasks):
+    require_auth(request)
+    async def _wrap():
+        try: await dataforseo.refresh_project_volumes(pid)
+        except Exception as e: print("vol err", e)
+    bg.add_task(_wrap)
     return RedirectResponse(f"/admin/project/{pid}", 303)
 
 @app.post("/admin/keyword/{kid}/delete")
