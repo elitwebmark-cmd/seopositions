@@ -67,8 +67,7 @@ async def send_now(chat_id, pid):
     try:
         await send(chat_id, build_overview(proj, targets, snap['id'], prev_id))
         await asyncio.sleep(0.3)
-        changes = build_changes(proj, targets, snap['id'], prev_id)
-        for m in (_chunk_msgs(changes.split("\n"), header="", max_len=3800) or [changes]):
+        for m in build_changes(proj, targets, snap['id'], prev_id):
             await send(chat_id, m); await asyncio.sleep(0.3)
     except Exception as e:
         print(f"send_now err: {e}")
@@ -179,33 +178,44 @@ def _collect_moves(project_id, targets, snap_id, prev_snap_id):
 
 
 def build_changes(project, targets, snap_id, prev_snap_id=None):
-    """Message 2 (may split) — movements + tag summary."""
+    """Returns LIST of self-contained Telegram messages (HTML-safe, no broken tags)."""
     if not prev_snap_id:
-        return "📈 <b>Рух позицій</b>\n\nℹ️ <i>Це перший зйом по проєкту. Порівняння буде доступне з наступного запуску.</i>"
+        return ["📈 <b>Рух позицій</b>\n\nℹ️ <i>Це перший зйом по проєкту. Порівняння буде доступне з наступного запуску.</i>"]
     entered, left = _collect_moves(project['id'], targets, snap_id, prev_snap_id)
-    lines = ["<b>📈 Рух позицій</b> <i>(всі регіони)</i>"]
+    MAX = 3800
+    messages = []
 
-    for th, label, icon in [(3,"ТОП 3","🥇"),(5,"ТОП 5","🏅"),(10,"ТОП 10","🎯"),(100,"ТОП 100","🆕")]:
-        lst = entered[th]
-        if not lst: continue
-        lines.append(f"\n{icon} <b>Зайшли в {label} ({len(lst)}):</b>")
-        for kw, tag, reg, p, c in lst[:15]:
-            tag_s = f" [{_escape(tag)}]" if tag else ""
-            lines.append(f"🟢 <code>{_escape(kw)}</code>{tag_s} · <i>{_escape(reg)}</i> · {_delta_str(p,c)}")
-        if len(lst) > 15:
-            lines.append(f"  <i>…+{len(lst)-15} ще</i>")
+    def _format_section(sign, heading, buckets):
+        """Build one message per section. Split by threshold if too long."""
+        parts = [heading]
+        total = 0
+        for th, label, icon in buckets:
+            lst = entered[th] if sign == '+' else left[th]
+            if not lst: continue
+            block = [f"\n{icon} <b>{'Зайшли в' if sign=='+' else 'Вилетіли з'} {label} ({len(lst)}):</b>"]
+            emoji = '🟢' if sign=='+' else '🔴'
+            for kw, tag, reg, p, c in lst[:15]:
+                tag_s = f" [{_escape(tag)}]" if tag else ""
+                block.append(f"{emoji} <code>{_escape(kw)}</code>{tag_s} · <i>{_escape(reg)}</i> · {_delta_str(p,c)}")
+            if len(lst) > 15:
+                block.append(f"  <i>…+{len(lst)-15} ще</i>")
+            block_s = "\n".join(block)
+            if total + len(block_s) > MAX and parts != [heading]:
+                messages.append("\n".join(parts))
+                parts = [heading, block_s]
+                total = len(heading) + len(block_s)
+            else:
+                parts.append(block_s)
+                total += len(block_s)
+        if parts != [heading]:
+            messages.append("\n".join(parts))
 
-    for th, label, icon in [(3,"ТОП 3","🥇"),(5,"ТОП 5","🏅"),(10,"ТОП 10","🎯"),(100,"ТОП 100","💥")]:
-        lst = left[th]
-        if not lst: continue
-        lines.append(f"\n{icon} <b>Вилетіли з {label} ({len(lst)}):</b>")
-        for kw, tag, reg, p, c in lst[:15]:
-            tag_s = f" [{_escape(tag)}]" if tag else ""
-            lines.append(f"🔴 <code>{_escape(kw)}</code>{tag_s} · <i>{_escape(reg)}</i> · {_delta_str(p,c)}")
-        if len(lst) > 15:
-            lines.append(f"  <i>…+{len(lst)-15} ще</i>")
+    _format_section('+', "<b>📈 Рух позицій</b> <i>(всі регіони)</i>",
+                    [(3,"ТОП 3","🥇"),(5,"ТОП 5","🏅"),(10,"ТОП 10","🎯"),(100,"ТОП 100","🆕")])
+    _format_section('-', "<b>📉 Падіння позицій</b> <i>(всі регіони)</i>",
+                    [(3,"ТОП 3","🥇"),(5,"ТОП 5","🏅"),(10,"ТОП 10","🎯"),(100,"ТОП 100","💥")])
 
-    # By tag summary — aggregate across all targets+keywords (current snapshot)
+    # ---- Tag summary as its OWN message, atomic (pre block intact) ----
     tag_stats = {}
     for tgt in targets:
         for r in query("""
@@ -223,17 +233,20 @@ def build_changes(project, targets, snap_id, prev_snap_id=None):
                 if p <= 100: st['t100'] += 1
                 st['pos'].append(p)
     if tag_stats:
-        lines.append("\n🏷 <b>По тегам (всі регіони):</b>")
-        lines.append("<pre>")
-        lines.append(f"{_pad('Тег',22)} {_pad('Усього',7)} {_pad('Т3',5)} {_pad('Т10',5)} {_pad('Сер',6)}")
+        parts = ["🏷 <b>По тегам (всі регіони)</b>\n", "<pre>"]
+        parts.append(f"{_pad('Тег',22)} {_pad('Усього',7)} {_pad('Т3',5)} {_pad('Т10',5)} {_pad('Сер',6)}")
         for tag in sorted(tag_stats.keys(), key=lambda x: -tag_stats[x]['t10']):
             s = tag_stats[tag]
             avg = sum(s['pos'])/len(s['pos']) if s['pos'] else None
             avg_s = f"{avg:.1f}" if avg else "—"
-            tg = tag[:22]
-            lines.append(f"{_pad(tg,22)} {_pad(s['count'],7)} {_pad(s['t3'],5)} {_pad(s['t10'],5)} {_pad(avg_s,6)}")
-        lines.append("</pre>")
-    return "\n".join(lines)
+            tg = _escape(tag)[:22]
+            parts.append(f"{_pad(tg,22)} {_pad(s['count'],7)} {_pad(s['t3'],5)} {_pad(s['t10'],5)} {_pad(avg_s,6)}")
+        parts.append("</pre>")
+        messages.append("\n".join(parts))
+
+    if not messages:
+        messages.append("ℹ️ <b>Жодних змін</b> з попереднього зрізу.")
+    return messages
 
 
 def format_report(project, target, snap_id, prev_snap_id=None):
@@ -428,9 +441,7 @@ async def send_project_report(project_id, snap_id):
     prev_id = prev['id'] if prev else None
     subs = query("SELECT * FROM tg_subscribers WHERE project_id=?", (project_id,))
     overview = build_overview(proj, targets, snap_id, prev_id)
-    changes_full = build_changes(proj, targets, snap_id, prev_id)
-    # Split changes if too long
-    changes_msgs = _chunk_msgs(changes_full.split("\n"), header="", max_len=3800) or [changes_full]
+    changes_msgs = build_changes(proj, targets, snap_id, prev_id)
     for sub in subs:
         try:
             await send(sub['chat_id'], overview); await asyncio.sleep(0.3)
