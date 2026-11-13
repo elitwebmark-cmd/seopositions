@@ -307,6 +307,36 @@ async def run_now(pid: int, request: Request, bg: BackgroundTasks):
 async def health():
     return {"ok": True}
 
+# ------------ Standalone tool: keyword volumes ------------
+@app.get("/tools/volumes", response_class=HTMLResponse)
+async def tools_volumes_page(request: Request):
+    require_auth(request)
+    return templates.TemplateResponse("tools_volumes.html", {
+        "request": request, "LANGUAGES": db.LANGUAGES,
+    })
+
+@app.post("/api/tools/volumes")
+async def tools_volumes_api(request: Request, keywords: str = Form(...), language: str = Form("uk"), location_code: str = Form("2804")):
+    require_auth(request)
+    kws = [k.strip() for k in keywords.splitlines() if k.strip()]
+    # deduplicate while preserving order
+    seen = set(); unique = []
+    for k in kws:
+        lk = k.lower()
+        if lk not in seen:
+            seen.add(lk); unique.append(k)
+    if not unique:
+        return {"err": "no keywords", "results": []}
+    try:
+        loc = int(location_code)
+    except: loc = 2804
+    try:
+        vols = await dataforseo.fetch_volumes(unique, language=language, location_code=loc)
+    except Exception as e:
+        return {"err": str(e), "results": []}
+    out = [{"keyword": k, "volume": vols.get(k.lower())} for k in unique]
+    return {"results": out, "count": len(out), "with_volume": sum(1 for x in out if x["volume"])}
+
 @app.get("/admin/debug/ranking/{rid}")
 async def debug_rank(rid: int, request: Request):
     require_auth(request)

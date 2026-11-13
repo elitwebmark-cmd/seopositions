@@ -1,0 +1,129 @@
+{% extends "base.html" %}{% block title %}Частотність · Rank Tracker{% endblock %}
+{% block body %}
+<section class="wrap">
+<header class="page-h"><h1>🔎 Частотність запитів <small>· DataForSEO · Google Ads</small></h1></header>
+
+<div class="card">
+<h2>Введіть запити</h2>
+<form id="form" class="grid">
+  <label style="grid-column:1/-1;">Запити (по одному на рядок, до ~5000)
+    <textarea name="keywords" rows="12" placeholder="купити шини&#10;купити шини київ&#10;літня резина&#10;зимова резина ціна"></textarea>
+  </label>
+  <label>Мова
+    <select name="language">
+      {% for code, title in LANGUAGES %}<option value="{{ code }}" {% if code=='uk' %}selected{% endif %}>{{ title }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Локація (Google Ads geo code)
+    <select name="location_code">
+      <option value="2804" selected>Україна (вся)</option>
+      <option value="1012998">Київ</option>
+      <option value="1012997">Харків</option>
+      <option value="1012996">Одеса</option>
+      <option value="1012995">Дніпро</option>
+      <option value="1012994">Львів</option>
+    </select>
+  </label>
+  <button type="submit" class="btn primary">▶ Зняти частотність</button>
+</form>
+<div id="status" style="margin-top:12px;font-weight:800;color:#5A3F8C;"></div>
+</div>
+
+<div class="card" id="results" style="display:none;">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+  <h2 style="margin:0;" id="summary"></h2>
+  <div style="display:flex;gap:8px;">
+    <button class="btn success" onclick="downloadXlsx()">📊 Скачати Excel</button>
+    <button class="btn" onclick="downloadCsv()" style="background:#FEDA47;color:#000;">💾 CSV</button>
+    <button class="btn" onclick="copyAll()">📋 Копіювати</button>
+  </div>
+</div>
+<div class="toolbar">
+  <div class="row">
+    <input id="filter" placeholder="🔍 фільтр" style="min-width:200px;">
+    <label>Сорт:
+      <select id="sortBy">
+        <option value="order">За порядком</option>
+        <option value="vol_desc" selected>Volume: спадання</option>
+        <option value="vol_asc">Volume: зростання</option>
+        <option value="kw">Запит А-Я</option>
+      </select>
+    </label>
+  </div>
+</div>
+<div class="scrollx">
+<table class="t" id="rt"><thead><tr><th>#</th><th>Запит</th><th class="num">Volume</th></tr></thead><tbody id="rb"></tbody></table>
+</div>
+</div>
+
+</section>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+let DATA = [];
+
+document.getElementById('form').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const status = document.getElementById('status');
+  status.textContent = '⏳ Запит до DataForSEO...';
+  document.getElementById('results').style.display = 'none';
+  const r = await fetch('/api/tools/volumes', {method:'POST', body: fd});
+  const j = await r.json();
+  if(j.err){
+    status.textContent = '❌ Помилка: ' + j.err;
+    status.style.color = '#9F2D26';
+    return;
+  }
+  DATA = j.results;
+  status.textContent = `✅ Готово. ${j.with_volume} з ${j.count} отримали частотність.`;
+  status.style.color = '#0F6E56';
+  document.getElementById('results').style.display = 'block';
+  document.getElementById('summary').textContent = `Результати (${j.count})`;
+  render();
+});
+
+function sorted(){
+  const by = document.getElementById('sortBy').value;
+  const f = document.getElementById('filter').value.toLowerCase();
+  let d = DATA.filter(x => !f || x.keyword.toLowerCase().includes(f));
+  if(by==='vol_desc') d = [...d].sort((a,b)=>(b.volume||0)-(a.volume||0));
+  else if(by==='vol_asc') d = [...d].sort((a,b)=>(a.volume||0)-(b.volume||0));
+  else if(by==='kw') d = [...d].sort((a,b)=>a.keyword.localeCompare(b.keyword));
+  return d;
+}
+function render(){
+  const rows = sorted();
+  document.getElementById('rb').innerHTML = rows.map((x,i)=>{
+    const vol = x.volume!=null ? `<b>${x.volume.toLocaleString('uk-UA').replace(/,/g,' ')}</b>` : '<span style="color:#9F2D26;">—</span>';
+    return `<tr><td>${i+1}</td><td>${x.keyword}</td><td class="num">${vol}</td></tr>`;
+  }).join('');
+}
+document.getElementById('filter').addEventListener('input', render);
+document.getElementById('sortBy').addEventListener('change', render);
+
+function downloadXlsx(){
+  const rows = sorted();
+  const hdr = ['Запит','Volume'];
+  const aoa = [hdr, ...rows.map(x=>[x.keyword, x.volume ?? ''])];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{wch: 40}, {wch: 12}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Volumes');
+  XLSX.writeFile(wb, 'keyword_volumes_'+new Date().toISOString().slice(0,10)+'.xlsx');
+}
+function downloadCsv(){
+  const rows = sorted();
+  const csv = '﻿' + 'Запит,Volume\n' + rows.map(x=>`"${x.keyword.replace(/"/g,'""')}",${x.volume ?? ''}`).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));
+  a.download = 'keyword_volumes_'+new Date().toISOString().slice(0,10)+'.csv'; a.click();
+}
+function copyAll(){
+  const rows = sorted();
+  const txt = rows.map(x=>`${x.keyword}\t${x.volume ?? ''}`).join('\n');
+  navigator.clipboard.writeText(txt);
+  const s = document.getElementById('status');
+  const prev = s.textContent; s.textContent = '📋 Скопійовано!'; setTimeout(()=>s.textContent=prev, 1500);
+}
+</script>
+{% endblock %}
