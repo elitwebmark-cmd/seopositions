@@ -19,9 +19,59 @@ async def tg_api(method, **kwargs):
             return None
 
 
-async def send(chat_id, text):
-    return await tg_api("sendMessage", chat_id=chat_id, text=text,
-                        parse_mode="HTML", disable_web_page_preview=True)
+async def send(chat_id, text, keyboard=None):
+    payload = {"chat_id": chat_id, "text": text,
+               "parse_mode": "HTML", "disable_web_page_preview": True}
+    if keyboard is not None:
+        payload["reply_markup"] = {"inline_keyboard": keyboard}
+    return await tg_api("sendMessage", **payload)
+
+
+async def send_menu(chat_id):
+    """Send main menu with buttons for subscribed projects."""
+    subs = query("""SELECT s.project_id, p.name FROM tg_subscribers s
+                    JOIN projects p ON p.id=s.project_id WHERE s.chat_id=?
+                    ORDER BY p.name""", (chat_id,))
+    if not subs:
+        all_projects = query("SELECT id, name FROM projects WHERE active=1 ORDER BY name")
+        kb = [[{"text": f"➕ Підписатись: {p['name']}", "callback_data": f"sub_{p['id']}"}]
+              for p in all_projects]
+        await send(chat_id, "👋 <b>Rank Tracker</b>\n\nУ тебе поки немає підписок. Обери проєкт:", kb)
+        return
+    kb = []
+    for s in subs:
+        kb.append([
+            {"text": f"📊 {s['name']}", "callback_data": f"report_{s['project_id']}"},
+            {"text": "❌", "callback_data": f"unsub_{s['project_id']}"}
+        ])
+    # Option to subscribe to more
+    others = query("""SELECT id, name FROM projects WHERE active=1
+                      AND id NOT IN (SELECT project_id FROM tg_subscribers WHERE chat_id=?)
+                      ORDER BY name""", (chat_id,))
+    for p in others:
+        kb.append([{"text": f"➕ Додати: {p['name']}", "callback_data": f"sub_{p['id']}"}])
+    await send(chat_id, "👋 <b>Твої підписки</b>\n\nТицяй по проєкту — надішлю звіт по останньому зрізу.\n\n<i>❌ — відписатись</i>", kb)
+
+
+async def send_now(chat_id, pid):
+    """Send latest report for project to chat."""
+    snap = one("SELECT id FROM snapshots WHERE project_id=? AND status='done' ORDER BY id DESC LIMIT 1", (pid,))
+    if not snap:
+        await send(chat_id, "ℹ️ Немає завершених зйомів по цьому проєкту.")
+        return
+    prev = one("SELECT id FROM snapshots WHERE project_id=? AND status='done' AND id<? ORDER BY id DESC LIMIT 1",
+               (pid, snap['id']))
+    proj = one("SELECT * FROM projects WHERE id=?", (pid,))
+    targets = query("SELECT * FROM targets WHERE project_id=? AND active=1", (pid,))
+    prev_id = prev['id'] if prev else None
+    try:
+        await send(chat_id, build_overview(proj, targets, snap['id'], prev_id))
+        await asyncio.sleep(0.3)
+        changes = build_changes(proj, targets, snap['id'], prev_id)
+        for m in (_chunk_msgs(changes.split("\n"), header="", max_len=3800) or [changes]):
+            await send(chat_id, m); await asyncio.sleep(0.3)
+    except Exception as e:
+        print(f"send_now err: {e}")
 
 
 def _escape(s):
@@ -407,6 +457,38 @@ def _is_allowed(chat_id, username):
 
 
 async def handle_update(update):
+    # ---- inline button callbacks ----
+    cb = update.get("callback_query")
+    if cb:
+        chat_id = cb["message"]["chat"]["id"]
+        username = cb.get("from", {}).get("username", "") or ""
+        data = cb.get("data", "")
+        await tg_api("answerCallbackQuery", callback_query_id=cb["id"])
+        if not _is_allowed(chat_id, username):
+            return
+        if data.startswith("report_"):
+            try: await send_now(chat_id, int(data.split("_")[1]))
+            except Exception as e: print(f"cb report err: {e}")
+            return
+        if data.startswith("sub_"):
+            pid = int(data.split("_")[1])
+            p = one("SELECT name FROM projects WHERE id=?", (pid,))
+            if p:
+                with tx() as c:
+                    c.execute("INSERT OR IGNORE INTO tg_subscribers(chat_id, username, project_id) VALUES (?,?,?)",
+                              (chat_id, username, pid))
+                await send(chat_id, f"✅ Підписано на <b>{_escape(p['name'])}</b>")
+                await send_menu(chat_id)
+            return
+        if data.startswith("unsub_"):
+            pid = int(data.split("_")[1])
+            with tx() as c:
+                c.execute("DELETE FROM tg_subscribers WHERE chat_id=? AND project_id=?", (chat_id, pid))
+            await send(chat_id, "✅ Відписано")
+            await send_menu(chat_id)
+            return
+        return
+
     msg = update.get("message") or update.get("edited_message")
     if not msg:
         return
@@ -418,80 +500,37 @@ async def handle_update(update):
         await send(chat_id, f"🚫 Доступ закритий.\n\nТвій chat_id: <code>{chat_id}</code>\nUsername: <code>@{_escape(username) if username else '—'}</code>\n\nПопроси адміна додати тебе в whitelist.")
         return
 
-    if text.startswith("/start") or text == "/help":
-        projects = query("SELECT id, name FROM projects WHERE active=1 ORDER BY name")
-        t = "👋 <b>Rank Tracker Bot</b>\n\n<b>Проєкти:</b>\n"
-        for p in projects:
-            t += f"• <code>{p['id']}</code> — {_escape(p['name'])}\n"
-        t += "\n<b>Команди:</b>\n"
-        t += "<code>/sub ID</code> — підписатись (щоденний звіт)\n"
-        t += "<code>/unsub ID</code> — відписатись\n"
-        t += "<code>/my</code> — мої підписки\n"
-        t += "<code>/now ID</code> — надіслати звіт зараз\n"
-        await send(chat_id, t)
+    if text.startswith("/start") or text in ("/help", "/menu", "/my"):
+        await send_menu(chat_id)
+        return
 
     elif text.startswith("/sub"):
         parts = text.split()
         if len(parts) < 2 or not parts[1].isdigit():
-            await send(chat_id, "Використання: <code>/sub project_id</code>")
-            return
+            await send_menu(chat_id); return
         pid = int(parts[1])
         p = one("SELECT name FROM projects WHERE id=?", (pid,))
         if not p:
-            await send(chat_id, f"Проєкт #{pid} не знайдено")
-            return
-        try:
-            with tx() as c:
-                c.execute("INSERT OR IGNORE INTO tg_subscribers(chat_id, username, project_id) VALUES (?,?,?)",
-                          (chat_id, username, pid))
-            await send(chat_id, f"✅ Підписано на <b>{_escape(p['name'])}</b>.\nЗвіти після кожного зйому.")
-        except Exception as e:
-            await send(chat_id, f"Помилка: {_escape(e)}")
+            await send(chat_id, f"Проєкт #{pid} не знайдено"); return
+        with tx() as c:
+            c.execute("INSERT OR IGNORE INTO tg_subscribers(chat_id, username, project_id) VALUES (?,?,?)",
+                      (chat_id, username, pid))
+        await send(chat_id, f"✅ Підписано на <b>{_escape(p['name'])}</b>")
+        await send_menu(chat_id)
 
     elif text.startswith("/unsub"):
         parts = text.split()
-        if len(parts) < 2 or not parts[1].isdigit():
-            await send(chat_id, "Використання: <code>/unsub project_id</code>")
-            return
-        pid = int(parts[1])
-        with tx() as c:
-            c.execute("DELETE FROM tg_subscribers WHERE chat_id=? AND project_id=?", (chat_id, pid))
-        await send(chat_id, "✅ Відписано")
-
-    elif text.startswith("/my"):
-        subs = query("""SELECT s.project_id, p.name FROM tg_subscribers s
-                        JOIN projects p ON p.id=s.project_id WHERE s.chat_id=?""", (chat_id,))
-        if not subs:
-            await send(chat_id, "Немає активних підписок. Напиши /start")
-        else:
-            t = "<b>Твої підписки:</b>\n"
-            for s in subs:
-                t += f"• <code>{s['project_id']}</code> — {_escape(s['name'])}\n"
-            await send(chat_id, t)
+        if len(parts) >= 2 and parts[1].isdigit():
+            pid = int(parts[1])
+            with tx() as c:
+                c.execute("DELETE FROM tg_subscribers WHERE chat_id=? AND project_id=?", (chat_id, pid))
+        await send_menu(chat_id)
 
     elif text.startswith("/now"):
         parts = text.split()
         if len(parts) < 2 or not parts[1].isdigit():
-            await send(chat_id, "Використання: <code>/now project_id</code>")
-            return
-        pid = int(parts[1])
-        snap = one("SELECT id FROM snapshots WHERE project_id=? AND status='done' ORDER BY id DESC LIMIT 1", (pid,))
-        if not snap:
-            await send(chat_id, "Немає завершених зйомів по цьому проєкту")
-            return
-        prev = one("SELECT id FROM snapshots WHERE project_id=? AND status='done' AND id<? ORDER BY id DESC LIMIT 1",
-                   (pid, snap['id']))
-        proj = one("SELECT * FROM projects WHERE id=?", (pid,))
-        targets = query("SELECT * FROM targets WHERE project_id=? AND active=1", (pid,))
-        prev_id = prev['id'] if prev else None
-        try:
-            await send(chat_id, build_overview(proj, targets, snap['id'], prev_id))
-            await asyncio.sleep(0.3)
-            changes = build_changes(proj, targets, snap['id'], prev_id)
-            for m in (_chunk_msgs(changes.split("\n"), header="", max_len=3800) or [changes]):
-                await send(chat_id, m); await asyncio.sleep(0.3)
-        except Exception as e:
-            print(f"report err: {e}")
+            await send_menu(chat_id); return
+        await send_now(chat_id, int(parts[1]))
 
 
 async def poll_loop():
@@ -502,7 +541,8 @@ async def poll_loop():
     print("TG bot: polling started")
     while True:
         try:
-            r = await tg_api("getUpdates", offset=offset, timeout=25)
+            r = await tg_api("getUpdates", offset=offset, timeout=25,
+                             allowed_updates=["message", "edited_message", "callback_query"])
             if r and r.get("ok"):
                 for u in r.get("result", []):
                     offset = u["update_id"] + 1
